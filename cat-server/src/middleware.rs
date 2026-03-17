@@ -1,4 +1,4 @@
-//! API key authentication middleware for operator routes.
+//! Authentication middleware for operator and agent routes.
 
 use axum::{
     body::Body,
@@ -13,7 +13,8 @@ use subtle::ConstantTimeEq;
 
 use crate::state::AppState;
 
-pub async fn auth_middleware(
+/// Validates X-Operator-Token header (operator/admin routes).
+pub async fn operator_auth(
     State(state): State<AppState>,
     req: Request<Body>,
     next: Next,
@@ -29,6 +30,29 @@ pub async fn auth_middleware(
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"status":"unauthorized"})),
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
+/// Validates X-Agent-Token header (agent routes: register, poll, result).
+pub async fn agent_auth(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let token = req
+        .headers()
+        .get("X-Agent-Token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let expected = &state.shared_token;
+    let ct_match: bool = expected.as_slice().ct_eq(token.as_bytes()).into();
+    if expected.is_empty() || !ct_match {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"status":"bad_token"})),
         )
             .into_response();
     }

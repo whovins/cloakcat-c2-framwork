@@ -50,16 +50,7 @@ pub struct TagsPayload {
     pub tags: Vec<String>,
 }
 
-// ========== Helpers ==========
-
-fn extract_agent_token(headers: &HeaderMap) -> &str {
-    headers
-        .get("X-Agent-Token")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-}
-
-// ========== Public routes ==========
+// ========== Agent routes (X-Agent-Token validated by agent_auth middleware) ==========
 
 pub async fn ping_handler() -> &'static str {
     "pong"
@@ -71,8 +62,6 @@ pub async fn register_handler(
     State(state): State<AppState>,
     Json(payload): Json<cloakcat_protocol::RegisterReq>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    service::verify_agent_token(&state, extract_agent_token(&headers))?;
-
     // If agent already exists, validate profile match
     if let Ok(agent) = service::get_agent(&state, &payload.agent_id).await {
         validate_profile(agent.profile_name.as_deref(), uri.path(), &headers)?;

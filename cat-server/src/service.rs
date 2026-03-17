@@ -2,7 +2,6 @@
 
 use base64::engine::general_purpose::STANDARD_NO_PAD as B64;
 use base64::Engine;
-use subtle::ConstantTimeEq;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -11,17 +10,6 @@ use cloakcat_protocol::{verify_result, Command, RegisterReq, ResultReq};
 use crate::db;
 use crate::error::ServerError;
 use crate::state::{AgentView, AppState, ResultView};
-
-// ========== Agent token ==========
-
-pub fn verify_agent_token(state: &AppState, provided: &str) -> Result<(), ServerError> {
-    let expected = &state.shared_token;
-    let ct_match: bool = expected.as_slice().ct_eq(provided.as_bytes()).into();
-    if expected.is_empty() || !ct_match {
-        return Err(ServerError::Unauthorized);
-    }
-    Ok(())
-}
 
 // ========== Agent operations ==========
 
