@@ -11,7 +11,7 @@ use crate::types::{AgentInfo, ResultItem, TagsResponse};
 
 pub fn attack_once(cli: &Client, base: &str, agent_id: &str, command: &str) -> Result<()> {
     let res = cli
-        .post(format!("{base}/command/{agent_id}"))
+        .post(format!("{base}/v1/command/{agent_id}"))
         .json(&serde_json::json!({ "command": command }))
         .send()?;
     let status = res.status();
@@ -25,7 +25,7 @@ pub fn attack_once(cli: &Client, base: &str, agent_id: &str, command: &str) -> R
 
 pub fn fetch_tags(cli: &Client, base: &str, agent_id: &str) -> Result<Vec<String>> {
     let res = cli
-        .get(format!("{base}/admin/agents/{agent_id}/tags"))
+        .get(format!("{base}/v1/admin/agents/{agent_id}/tags"))
         .send()?;
     let status = res.status();
     let text = res.text()?;
@@ -39,7 +39,7 @@ pub fn fetch_tags(cli: &Client, base: &str, agent_id: &str) -> Result<Vec<String
 
 pub fn update_tags(cli: &Client, base: &str, agent_id: &str, tags: &[String]) -> Result<()> {
     let res = cli
-        .post(format!("{base}/admin/agents/{agent_id}/tags"))
+        .post(format!("{base}/v1/admin/agents/{agent_id}/tags"))
         .json(&serde_json::json!({ "tags": tags }))
         .send()?;
     let status = res.status();
@@ -61,7 +61,7 @@ pub fn run_command_and_get_stdout(
 
     for _ in 0..30 {
         let res = cli
-            .get(format!("{base}/admin/results?agent_id={agent_id}&limit=5"))
+            .get(format!("{base}/v1/admin/results?agent_id={agent_id}&limit=5"))
             .send()?;
         let status = res.status();
         let text = res.text()?;
@@ -90,7 +90,7 @@ pub fn resolve_agent_identifier(cli: &Client, base_url: &str, ident: &str) -> Re
         return Ok(ident.to_string());
     }
 
-    let res = cli.get(format!("{base_url}/admin/agents")).send()?;
+    let res = cli.get(format!("{base_url}/v1/admin/agents")).send()?;
     if !res.status().is_success() {
         return Err(anyhow!("failed to fetch agents: {}", res.status()));
     }

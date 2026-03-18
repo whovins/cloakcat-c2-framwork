@@ -6,6 +6,9 @@ use cloakcat_protocol::{DefaultProfile, HealthProfile, ListenerProfile};
 use crate::handlers;
 use crate::state::AppState;
 
+/// API version prefix applied to all routes.
+pub const API_VERSION: &str = "/v1";
+
 /// Register agent routes (register/poll/result) for a given profile.
 fn agent_routes_for(profile: &dyn ListenerProfile) -> Router<AppState> {
     let base = profile.base_path();
@@ -41,12 +44,16 @@ pub fn build_router(state: AppState) -> Router {
             crate::middleware::operator_auth,
         ));
 
-    // Public (unauthenticated) routes
+    // Nest everything under /v1
+    let versioned = Router::new()
+        .merge(agent_routes)
+        .merge(protected_routes);
+
+    // Public (unauthenticated) routes — outside version prefix
     let public_routes = Router::new()
         .route("/ping", get(handlers::ping_handler));
 
     public_routes
-        .merge(agent_routes)
-        .merge(protected_routes)
+        .nest(API_VERSION, versioned)
         .with_state(state)
 }

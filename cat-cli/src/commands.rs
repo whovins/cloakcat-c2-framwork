@@ -44,7 +44,7 @@ fn follow_results(
 
     while !cancel.load(Ordering::SeqCst) {
         let res = cli
-            .get(format!("{base}/admin/results?agent_id={agent}&limit=200"))
+            .get(format!("{base}/v1/admin/results?agent_id={agent}&limit=200"))
             .send()?;
         let text = res.text()?;
         let v: serde_json::Value = serde_json::from_str(&text)?;
@@ -111,7 +111,7 @@ env:
         }
 
         "agents" => {
-            let res = cli.get(format!("{base}/admin/agents")).send()?;
+            let res = cli.get(format!("{base}/v1/admin/agents")).send()?;
             let text = res.text()?;
             if let Err(e) = print_agents(&text) {
                 eprintln!("failed to parse agents list: {e}");
@@ -227,7 +227,7 @@ env:
             let agent = parts.remove(0);
             let alias = parts.join(" ");
             let res = cli
-                .post(format!("{base}/admin/agents/{agent}/alias"))
+                .post(format!("{base}/v1/admin/agents/{agent}/alias"))
                 .json(&serde_json::json!({ "alias": alias, "note": serde_json::Value::Null }))
                 .send()?;
             if res.status().is_success() {
@@ -255,7 +255,7 @@ env:
                 }
             }
             let res = cli
-                .get(format!("{base}/admin/results?agent_id={agent}&limit={limit}"))
+                .get(format!("{base}/v1/admin/results?agent_id={agent}&limit={limit}"))
                 .send()?;
             print_json(res.text()?);
         }
@@ -277,7 +277,7 @@ env:
                 }
             }
             let res = cli
-                .get(format!("{base}/admin/results?agent_id={agent}&limit={limit}"))
+                .get(format!("{base}/v1/admin/results?agent_id={agent}&limit={limit}"))
                 .send()?;
             let status = res.status();
             let text = res.text()?;
@@ -323,7 +323,7 @@ env:
             if let Some(agent_id) = &agent_resolved {
                 qs.push(format!("agent_id={}", urlencoding::encode(agent_id)));
             }
-            let url = format!("{}/admin/audit?{}", base, qs.join("&"));
+            let url = format!("{}/v1/admin/audit?{}", base, qs.join("&"));
 
             let res = cli.get(url).send()?;
             let status = res.status();
@@ -444,7 +444,7 @@ env:
             } else {
                 Some(parts.remove(0))
             };
-            let res = cli.get(format!("{base}/admin/agents")).send()?;
+            let res = cli.get(format!("{base}/v1/admin/agents")).send()?;
             let text = res.text()?;
             let agents: Vec<AgentInfo> = serde_json::from_str(&text)?;
             let filtered: Vec<AgentInfo> = if let Some(tag) = filter_tag.as_ref() {

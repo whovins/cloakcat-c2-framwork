@@ -2,6 +2,9 @@
 
 use crate::profile::{profile_by_name, ListenerProfile};
 
+/// API version prefix. Must match cat-server/src/routes.rs.
+pub const API_VERSION: &str = "/v1";
+
 /// Builds register, poll, and result URLs for an agent.
 #[derive(Debug, Clone)]
 pub struct Endpoints {
@@ -20,10 +23,11 @@ impl Endpoints {
 
     /// Creates endpoints from an explicit profile reference.
     pub fn from_profile(base: &str, profile: &dyn ListenerProfile, agent_id: &str) -> Self {
+        let v = API_VERSION;
         Self {
-            register: profile.register_url(base),
-            poll: profile.poll_url(base, agent_id),
-            result: profile.result_url(base, agent_id),
+            register: format!("{}{}{}/register", base, v, profile.base_path()),
+            poll: format!("{}{}{}/poll/{}", base, v, profile.base_path(), agent_id),
+            result: format!("{}{}{}/result/{}", base, v, profile.base_path(), agent_id),
         }
     }
 }

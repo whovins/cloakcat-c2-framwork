@@ -22,21 +22,6 @@ pub trait ListenerProfile: Send + Sync {
             None => true,
         }
     }
-
-    /// Build the agent-side register URL.
-    fn register_url(&self, base: &str) -> String {
-        format!("{}{}/register", base, self.base_path())
-    }
-
-    /// Build the agent-side poll URL.
-    fn poll_url(&self, base: &str, agent_id: &str) -> String {
-        format!("{}{}/poll/{}", base, self.base_path(), agent_id)
-    }
-
-    /// Build the agent-side result URL.
-    fn result_url(&self, base: &str, agent_id: &str) -> String {
-        format!("{}{}/result/{}", base, self.base_path(), agent_id)
-    }
 }
 
 // ─── Built-in profiles ───
@@ -85,21 +70,6 @@ mod tests {
         assert!(!p.validate("/register", Some("HealthMonitor/1.3")));
         assert!(!p.validate("/api/health/metrics/register", Some("curl/7.0")));
         assert!(!p.validate("/api/health/metrics/register", None));
-    }
-
-    #[test]
-    fn health_profile_urls() {
-        let p = HealthProfile;
-        assert_eq!(p.register_url("https://c2"), "https://c2/api/health/metrics/register");
-        assert_eq!(p.poll_url("https://c2", "abc"), "https://c2/api/health/metrics/poll/abc");
-        assert_eq!(p.result_url("https://c2", "abc"), "https://c2/api/health/metrics/result/abc");
-    }
-
-    #[test]
-    fn default_profile_urls() {
-        let p = DefaultProfile;
-        assert_eq!(p.register_url("https://c2"), "https://c2/register");
-        assert_eq!(p.poll_url("https://c2", "abc"), "https://c2/poll/abc");
     }
 
     #[test]
