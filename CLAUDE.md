@@ -123,10 +123,10 @@ Agents can masquerade as health check traffic. `HEALTH_PROFILE_NAME`, `HEALTH_BA
 - Axum 미들웨어 인증 구조
 
 ### 진행 상황
-- [ ] Phase 0: 즉시 수정 (F1~F5) — HMAC 타이밍/구분자, 타임아웃, 크기제한
-- [ ] Phase 1: 서버 리팩토링 (R1, R7, R4, R6) — service 레이어, 커스텀 에러, Notify
-- [ ] Phase 2: 프로토콜 확장 (R8, R2, R3, R9, R10) — HKDF, trait, DTO, 버전
-- [ ] Phase 3: CLI 현대화 (R5) — clap + 모듈화
+- [x] Phase 0: 즉시 수정 (F1~F5) — HMAC 타이밍/구분자, 타임아웃, 크기제한
+- [x] Phase 1: 서버 리팩토링 (R1, R7, R4, R6) — service 레이어, 커스텀 에러, Notify
+- [x] Phase 2: 프로토콜 확장 (R8, R2, R3, R9, R10) — HKDF, trait, DTO, 버전
+- [x] Phase 3: CLI 현대화 (R5) — clap + 모듈화
 - [ ] Phase 4: upload/download + SOCKS5 프록시
 - [ ] Phase 5: 토큰 조작 + lateral movement
 - [ ] Phase 6: BOF 로더
