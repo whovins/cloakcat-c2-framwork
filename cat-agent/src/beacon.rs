@@ -11,7 +11,7 @@ use std::env;
 use std::time::Duration;
 
 use anyhow::Context;
-use cloakcat_protocol::{sign_result, Command, DerivedKeys, Endpoints, ResultReq};
+use cloakcat_protocol::{profile_by_name, sign_result, Command, DerivedKeys, Endpoints, ResultReq};
 use rand::Rng;
 use reqwest::Client;
 use tokio::time::sleep;
@@ -91,14 +91,15 @@ fn load_or_create_agent_id() -> String {
 pub async fn run() -> anyhow::Result<()> {
     let cfg = load_agent_config().context("config load failed")?;
 
-    let is_health = cfg.profile_name == cloakcat_protocol::HEALTH_PROFILE_NAME;
+    let profile = profile_by_name(&cfg.profile_name);
 
     let mut builder = Client::builder();
-    if is_health {
+    if let Some(ua) = profile.user_agent() {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::USER_AGENT,
-            reqwest::header::HeaderValue::from_static(cloakcat_protocol::HEALTH_USER_AGENT),
+            reqwest::header::HeaderValue::from_str(ua)
+                .expect("profile user_agent must be valid header value"),
         );
         builder = builder.default_headers(headers);
     }

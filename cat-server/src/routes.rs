@@ -1,19 +1,24 @@
 //! Router and route registration.
 
 use axum::{routing::{get, post}, Router};
+use cloakcat_protocol::{DefaultProfile, HealthProfile, ListenerProfile};
 
 use crate::handlers;
 use crate::state::AppState;
 
+/// Register agent routes (register/poll/result) for a given profile.
+fn agent_routes_for(profile: &dyn ListenerProfile) -> Router<AppState> {
+    let base = profile.base_path();
+    Router::new()
+        .route(&format!("{base}/register"), post(handlers::register_handler))
+        .route(&format!("{base}/poll/{{agent_id}}"), get(handlers::poll_handler))
+        .route(&format!("{base}/result/{{agent_id}}"), post(handlers::result_handler))
+}
+
 pub fn build_router(state: AppState) -> Router {
     // Agent routes — require X-Agent-Token via agent_auth middleware
-    let agent_routes = Router::new()
-        .route("/register", post(handlers::register_handler))
-        .route("/poll/{agent_id}", get(handlers::poll_handler))
-        .route("/result/{agent_id}", post(handlers::result_handler))
-        .route("/api/health/metrics/register", post(handlers::register_handler))
-        .route("/api/health/metrics/poll/{agent_id}", get(handlers::poll_handler))
-        .route("/api/health/metrics/result/{agent_id}", post(handlers::result_handler))
+    let agent_routes = agent_routes_for(&DefaultProfile)
+        .merge(agent_routes_for(&HealthProfile))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::agent_auth,

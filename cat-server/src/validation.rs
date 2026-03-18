@@ -1,28 +1,30 @@
-//! Profile and request validation (e.g. health profile path/UA).
+//! Profile and request validation via ListenerProfile trait.
 
 use axum::http::{self, HeaderMap};
-use cloakcat_protocol::{HEALTH_BASE_PATH, HEALTH_PROFILE_NAME, HEALTH_USER_AGENT};
+use cloakcat_protocol::profile_by_name;
 
 use crate::error::ServerError;
 
-/// Validates health profile requests (path prefix and User-Agent).
+/// Validates that the request path and User-Agent match the agent's profile.
 pub fn validate_profile(
     profile_name: Option<&str>,
     path: &str,
     headers: &HeaderMap,
 ) -> Result<(), ServerError> {
-    if profile_name == Some(HEALTH_PROFILE_NAME) {
-        if !path.starts_with(HEALTH_BASE_PATH) {
-            return Err(ServerError::Forbidden("bad_profile_path".into()));
-        }
-        let ua_ok = headers
-            .get(http::header::USER_AGENT)
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v == HEALTH_USER_AGENT)
-            .unwrap_or(false);
-        if !ua_ok {
-            return Err(ServerError::Forbidden("bad_user_agent".into()));
-        }
+    let name = profile_name.unwrap_or("default");
+    let profile = profile_by_name(name);
+
+    // Default profile allows everything — skip validation.
+    if profile.base_path().is_empty() && profile.user_agent().is_none() {
+        return Ok(());
+    }
+
+    let ua = headers
+        .get(http::header::USER_AGENT)
+        .and_then(|v| v.to_str().ok());
+
+    if !profile.validate(path, ua) {
+        return Err(ServerError::Forbidden("profile_mismatch".into()));
     }
     Ok(())
 }
