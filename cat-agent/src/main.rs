@@ -6,6 +6,7 @@ mod exec;
 mod host;
 mod tasks;
 mod transport;
+mod tunnel;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

