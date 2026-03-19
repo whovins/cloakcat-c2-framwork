@@ -144,3 +144,43 @@ pub struct TagsResponse {
     pub tags: Vec<String>,
 }
 
+// ─── Tunnel / Reverse SOCKS5 ───
+
+/// Direction of a tunnel frame.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelAction {
+    /// Server → agent: open TCP connection to `data` ("host:port").
+    Open,
+    /// Bidirectional: relay payload (base64-encoded bytes in `data`).
+    Data,
+    /// Either direction: close the tunnel session.
+    Close,
+}
+
+/// A single tunnel frame piggybacked on the poll channel or sent via tunnel endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelData {
+    pub tunnel_id: u32,
+    pub action: TunnelAction,
+    /// Open: "host:port". Data: base64-encoded bytes. Close: "".
+    pub data: String,
+}
+
+/// Unified poll response — wraps an optional command and piggybacked tunnel frames.
+/// The agent must parse poll responses as this type (instead of bare Command).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PollResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<Command>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tunnel_frames: Vec<TunnelData>,
+}
+
+/// Active SOCKS5 listener info returned by GET /admin/socks/list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SocksListenerView {
+    pub agent_id: String,
+    pub port: u16,
+}
+
