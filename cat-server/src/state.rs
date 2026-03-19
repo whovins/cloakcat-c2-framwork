@@ -7,6 +7,8 @@ use cloakcat_protocol::DerivedKeys;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, Notify};
 
+use crate::tunnel::TunnelManager;
+
 /// In-memory buffer for a chunked upload (CLI → server → agent).
 pub struct UploadBuffer {
     /// Chunks indexed by seq number; None = not yet received.
@@ -33,6 +35,8 @@ pub struct AppState {
     pub upload_buffers: Arc<Mutex<HashMap<String, UploadBuffer>>>,
     /// Pending download transfers: transfer_id → buffer.
     pub download_buffers: Arc<Mutex<HashMap<String, DownloadBuffer>>>,
+    /// Reverse SOCKS5 tunnel manager.
+    pub tunnel_mgr: Arc<Mutex<TunnelManager>>,
 }
 
 impl AppState {

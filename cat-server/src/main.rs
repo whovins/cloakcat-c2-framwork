@@ -7,6 +7,7 @@ mod middleware;
 mod routes;
 mod service;
 mod state;
+mod tunnel;
 mod validation;
 
 use std::net::SocketAddr;
@@ -52,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         cmd_notify: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         upload_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         download_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        tunnel_mgr: std::sync::Arc::new(tokio::sync::Mutex::new(tunnel::TunnelManager::new())),
     };
     let app = build_router(state)
         .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)); // 2 MB
