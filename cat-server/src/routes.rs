@@ -22,6 +22,9 @@ pub fn build_router(state: AppState) -> Router {
     // Agent routes — require X-Agent-Token via agent_auth middleware
     let agent_routes = agent_routes_for(&DefaultProfile)
         .merge(agent_routes_for(&HealthProfile))
+        // Transfer: agent fetches upload file / sends download chunks
+        .route("/transfer/upload-file/{transfer_id}", get(handlers::get_upload_file_handler))
+        .route("/transfer/download-chunk/{agent_id}", post(handlers::download_chunk_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::agent_auth,
@@ -39,6 +42,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/admin/audit", get(handlers::admin_audit))
         .route("/admin/agents/{agent_id}/tags", get(handlers::admin_agent_tags))
         .route("/admin/agents/{agent_id}/tags", post(handlers::admin_set_agent_tags))
+        // Transfer: operator uploads file chunks / polls download result
+        .route("/transfer/upload-chunk/{agent_id}", post(handlers::upload_chunk_handler))
+        .route("/transfer/download-result/{transfer_id}", get(handlers::get_download_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::operator_auth,

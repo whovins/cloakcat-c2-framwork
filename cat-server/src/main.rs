@@ -50,6 +50,8 @@ async fn main() -> anyhow::Result<()> {
         derived_keys,
         operator_token,
         cmd_notify: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        upload_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        download_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
     };
     let app = build_router(state)
         .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)); // 2 MB

@@ -7,7 +7,20 @@ use cloakcat_protocol::DerivedKeys;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, Notify};
 
-/// Shared application state (DB pool + command notification).
+/// In-memory buffer for a chunked upload (CLI → server → agent).
+pub struct UploadBuffer {
+    /// Chunks indexed by seq number; None = not yet received.
+    pub chunks: Vec<Option<Vec<u8>>>,
+}
+
+/// In-memory buffer for a chunked download (agent → server → CLI).
+pub struct DownloadBuffer {
+    /// Chunks indexed by seq number; None = not yet received.
+    pub chunks: Vec<Option<Vec<u8>>>,
+    pub complete: bool,
+}
+
+/// Shared application state (DB pool + command notification + transfer buffers).
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -16,6 +29,10 @@ pub struct AppState {
     pub operator_token: String,
     /// Per-agent notification: poll_command waits, push_command notifies.
     pub cmd_notify: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    /// Pending upload transfers: transfer_id → buffer.
+    pub upload_buffers: Arc<Mutex<HashMap<String, UploadBuffer>>>,
+    /// Pending download transfers: transfer_id → buffer.
+    pub download_buffers: Arc<Mutex<HashMap<String, DownloadBuffer>>>,
 }
 
 impl AppState {
