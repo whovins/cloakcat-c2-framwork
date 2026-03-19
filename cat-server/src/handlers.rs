@@ -9,7 +9,8 @@ use axum::{
 };
 use serde::Deserialize;
 
-use cloakcat_protocol::{FileChunk, TaskType};
+use cloakcat_protocol::{FileChunk, SocksListenerView, TaskType, TunnelData};
+
 
 use crate::error::ServerError;
 use crate::service;
@@ -44,6 +45,23 @@ pub struct UpdateAliasReq {
 #[derive(Deserialize)]
 pub struct HoldParam {
     pub hold: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct TunnelRecvQuery {
+    pub tunnel_id: u32,
+    pub hold: Option<u64>,
+}
+
+#[derive(Deserialize)]
+pub struct SocksStartReq {
+    pub agent_id: String,
+    pub port: u16,
+}
+
+#[derive(Deserialize)]
+pub struct SocksStopReq {
+    pub agent_id: String,
 }
 
 #[derive(Deserialize)]
@@ -98,14 +116,8 @@ pub async fn poll_handler(
 
     let hold = q.hold.unwrap_or(0);
     match service::poll_command(&state, &agent_id, hold).await? {
-        Some(cmd) => Ok((
-            StatusCode::OK,
-            Json(serde_json::to_value(cmd).unwrap()),
-        )),
-        None => Ok((
-            StatusCode::NO_CONTENT,
-            Json(serde_json::json!({})),
-        )),
+        Some(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        None => Ok((StatusCode::NO_CONTENT, Json(serde_json::json!({}))).into_response()),
     }
 }
 
@@ -249,4 +261,58 @@ pub async fn download_chunk_handler(
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let complete = service::receive_download_chunk(&state, &chunk).await?;
     Ok(Json(serde_json::json!({ "status": "ok", "complete": complete })))
+}
+
+// ========== Tunnel routes (agent-facing) ==========
+
+/// GET /v1/tunnel/recv/{agent_id}?tunnel_id={id}&hold={secs}
+/// Agent polls for data to relay to its local TCP target.
+pub async fn tunnel_recv_handler(
+    Path(agent_id): Path<String>,
+    State(state): State<AppState>,
+    Query(q): Query<TunnelRecvQuery>,
+) -> Result<impl IntoResponse, ServerError> {
+    let hold = q.hold.unwrap_or(0);
+    match service::recv_tunnel_data(&state, &agent_id, q.tunnel_id, hold).await? {
+        Some(frame) => Ok((StatusCode::OK, Json(frame)).into_response()),
+        None => Ok((StatusCode::NO_CONTENT, Json(serde_json::json!({}))).into_response()),
+    }
+}
+
+/// POST /v1/tunnel/send/{agent_id} — agent sends data from its local TCP target.
+pub async fn tunnel_send_handler(
+    Path(agent_id): Path<String>,
+    State(state): State<AppState>,
+    Json(frame): Json<TunnelData>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    service::send_tunnel_data(&state, &agent_id, frame).await?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+// ========== SOCKS5 management (operator-facing) ==========
+
+/// POST /v1/admin/socks/start — start a SOCKS5 listener for an agent.
+pub async fn socks_start_handler(
+    State(state): State<AppState>,
+    Json(req): Json<SocksStartReq>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    service::socks_start(&state, &req.agent_id, req.port).await?;
+    Ok(Json(serde_json::json!({ "status": "ok", "port": req.port })))
+}
+
+/// POST /v1/admin/socks/stop — stop the SOCKS5 listener for an agent.
+pub async fn socks_stop_handler(
+    State(state): State<AppState>,
+    Json(req): Json<SocksStopReq>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    service::socks_stop(&state, &req.agent_id).await?;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+/// GET /v1/admin/socks/list — list active SOCKS5 listeners.
+pub async fn socks_list_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<SocksListenerView>>, ServerError> {
+    let list = service::socks_list(&state).await?;
+    Ok(Json(list))
 }

@@ -25,6 +25,9 @@ pub fn build_router(state: AppState) -> Router {
         // Transfer: agent fetches upload file / sends download chunks
         .route("/transfer/upload-file/{transfer_id}", get(handlers::get_upload_file_handler))
         .route("/transfer/download-chunk/{agent_id}", post(handlers::download_chunk_handler))
+        // Tunnel: agent polls for data to relay / sends data from TCP target
+        .route("/tunnel/recv/{agent_id}", get(handlers::tunnel_recv_handler))
+        .route("/tunnel/send/{agent_id}", post(handlers::tunnel_send_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::agent_auth,
@@ -45,6 +48,10 @@ pub fn build_router(state: AppState) -> Router {
         // Transfer: operator uploads file chunks / polls download result
         .route("/transfer/upload-chunk/{agent_id}", post(handlers::upload_chunk_handler))
         .route("/transfer/download-result/{transfer_id}", get(handlers::get_download_handler))
+        // SOCKS5 tunnel management
+        .route("/admin/socks/start", post(handlers::socks_start_handler))
+        .route("/admin/socks/stop", post(handlers::socks_stop_handler))
+        .route("/admin/socks/list", get(handlers::socks_list_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::operator_auth,

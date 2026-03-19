@@ -6,8 +6,8 @@ use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
 use cloakcat_protocol::{
-    verify_result, AgentView, Command, FileChunk, RegisterReq, ResultReq, ResultView, TaskType,
-    UploadTask,
+    verify_result, AgentView, Command, FileChunk, PollResponse, RegisterReq, ResultReq, ResultView,
+    SocksListenerView, TaskType, TunnelAction, TunnelData, UploadTask,
 };
 
 use crate::db;
@@ -155,18 +155,30 @@ pub async fn poll_command(
     state: &AppState,
     agent_id: &str,
     hold_secs: u64,
-) -> Result<Option<Command>, ServerError> {
+) -> Result<Option<PollResponse>, ServerError> {
     let hold = hold_secs.min(120);
 
-    // First check: return immediately if a command is already queued
+    // Drain any pending Open frames first.
+    let opens: Vec<TunnelData> = state.tunnel_mgr.lock().await.take_pending_opens(agent_id);
+
+    // Immediate check: command already queued or tunnel opens pending.
     if let Some(cmd) = fetch_command(state, agent_id).await? {
-        return Ok(Some(cmd));
+        return Ok(Some(PollResponse {
+            command: Some(cmd),
+            tunnel_frames: opens,
+        }));
+    }
+    if !opens.is_empty() {
+        return Ok(Some(PollResponse {
+            command: None,
+            tunnel_frames: opens,
+        }));
     }
     if hold == 0 {
         return Ok(None);
     }
 
-    // Long-hold: wait for notification or timeout
+    // Long-hold: wait for notification (command push or tunnel open) or timeout.
     let notify = state.get_notify(agent_id).await;
     let deadline = Instant::now() + Duration::from_secs(hold);
 
@@ -176,14 +188,177 @@ pub async fn poll_command(
             return Ok(None);
         }
 
-        // Wait for push_command to notify us, or timeout
         let _ = tokio::time::timeout(remaining, notify.notified()).await;
 
-        // Check DB regardless (notification or timeout)
+        let opens: Vec<TunnelData> = state.tunnel_mgr.lock().await.take_pending_opens(agent_id);
+
         if let Some(cmd) = fetch_command(state, agent_id).await? {
-            return Ok(Some(cmd));
+            return Ok(Some(PollResponse {
+                command: Some(cmd),
+                tunnel_frames: opens,
+            }));
+        }
+        if !opens.is_empty() {
+            return Ok(Some(PollResponse {
+                command: None,
+                tunnel_frames: opens,
+            }));
         }
     }
+}
+
+// ========== Tunnel ==========
+
+/// Drain data queued for the agent to relay to a specific tunnel target.
+/// Waits up to `hold_secs` seconds if the buffer is currently empty.
+pub async fn recv_tunnel_data(
+    state: &AppState,
+    agent_id: &str,
+    tunnel_id: u32,
+    hold_secs: u64,
+) -> Result<Option<TunnelData>, ServerError> {
+    let session = {
+        let mgr = state.tunnel_mgr.lock().await;
+        mgr.sessions
+            .get(&tunnel_id)
+            .filter(|s| s.agent_id == agent_id)
+            .cloned()
+    };
+    let session = session.ok_or(ServerError::NotFound)?;
+
+    // Quick drain
+    let data = drain_session_to_agent(&session);
+    if !data.is_empty() {
+        return Ok(Some(TunnelData {
+            tunnel_id,
+            action: TunnelAction::Data,
+            data: B64.encode(&data),
+        }));
+    }
+
+    // Return Close if already shut down
+    if session.closed.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(Some(TunnelData {
+            tunnel_id,
+            action: TunnelAction::Close,
+            data: String::new(),
+        }));
+    }
+
+    if hold_secs == 0 {
+        return Ok(None);
+    }
+
+    // Wait for data or close
+    let _ = tokio::time::timeout(
+        Duration::from_secs(hold_secs.min(10)),
+        session.to_agent_notify.notified(),
+    )
+    .await;
+
+    let data = drain_session_to_agent(&session);
+    if !data.is_empty() {
+        return Ok(Some(TunnelData {
+            tunnel_id,
+            action: TunnelAction::Data,
+            data: B64.encode(&data),
+        }));
+    }
+    if session.closed.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(Some(TunnelData {
+            tunnel_id,
+            action: TunnelAction::Close,
+            data: String::new(),
+        }));
+    }
+    Ok(None)
+}
+
+fn drain_session_to_agent(session: &crate::tunnel::TunnelSession) -> Vec<u8> {
+    // Non-async drain using try_lock; OK because contention is rare.
+    match session.to_agent.try_lock() {
+        Ok(mut q) => q.drain(..).flatten().collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Receive data sent by the agent and forward it to the SOCKS5 client.
+pub async fn send_tunnel_data(
+    state: &AppState,
+    agent_id: &str,
+    frame: TunnelData,
+) -> Result<(), ServerError> {
+    let session = {
+        let mgr = state.tunnel_mgr.lock().await;
+        mgr.sessions
+            .get(&frame.tunnel_id)
+            .filter(|s| s.agent_id == agent_id)
+            .cloned()
+    };
+    let session = session.ok_or(ServerError::NotFound)?;
+
+    match frame.action {
+        TunnelAction::Close => {
+            session.closed.store(true, std::sync::atomic::Ordering::Release);
+            session.from_agent_notify.notify_one();
+            session.to_agent_notify.notify_waiters();
+        }
+        TunnelAction::Data => {
+            let bytes = B64.decode(&frame.data)
+                .map_err(|_| ServerError::BadRequest("invalid base64 in tunnel data".into()))?;
+            session.from_agent.lock().await.push_back(bytes);
+            session.from_agent_notify.notify_one();
+        }
+        TunnelAction::Open => {
+            // Agent should never send Open frames.
+        }
+    }
+    Ok(())
+}
+
+/// Start a SOCKS5 listener for `agent_id` on `port`.
+pub async fn socks_start(
+    state: &AppState,
+    agent_id: &str,
+    port: u16,
+) -> Result<(), ServerError> {
+    // Verify agent exists.
+    get_agent(state, agent_id).await?;
+
+    crate::tunnel::start_listener(
+        agent_id.to_string(),
+        port,
+        state.tunnel_mgr.clone(),
+        state.cmd_notify.clone(),
+    )
+    .await
+    .map_err(|e| ServerError::Internal(e))?;
+
+    println!("[socks] started: agent={} port={}", agent_id, port);
+    Ok(())
+}
+
+/// Stop the SOCKS5 listener for `agent_id`.
+pub async fn socks_stop(state: &AppState, agent_id: &str) -> Result<(), ServerError> {
+    let stopped = state.tunnel_mgr.lock().await.stop_listener(agent_id);
+    if stopped.is_none() {
+        return Err(ServerError::NotFound);
+    }
+    println!("[socks] stopped: agent={}", agent_id);
+    Ok(())
+}
+
+/// List active SOCKS5 listeners.
+pub async fn socks_list(state: &AppState) -> Result<Vec<SocksListenerView>, ServerError> {
+    let mgr = state.tunnel_mgr.lock().await;
+    Ok(mgr
+        .listeners
+        .iter()
+        .map(|(agent_id, &port)| SocksListenerView {
+            agent_id: agent_id.clone(),
+            port,
+        })
+        .collect())
 }
 
 fn decode_command(cmd_rec: crate::db::CommandRecord) -> Command {
