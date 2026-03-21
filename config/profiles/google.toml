@@ -1,0 +1,78 @@
+# CloakCat Malleable C2 — Google APIs camouflage profile
+#
+# Mimics Google Fonts / gstatic content delivery traffic.
+# Poll responses are wrapped in a CSS comment; POST bodies are XOR-obfuscated
+# then base64url encoded.
+
+[metadata]
+name = "google"
+description = "Google gstatic / Fonts CDN traffic camouflage."
+
+# ─── GET block (agent polling) ────────────────────────────────────────────────
+[http_get]
+uri  = "/apis/v1"   # routes: /v1/apis/v1/register, /v1/apis/v1/poll/{id}, …
+verb = "GET"
+
+[[http_get.client.headers]]
+name  = "User-Agent"
+value = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+[[http_get.client.headers]]
+name  = "Accept"
+value = "text/css,*/*;q=0.1"
+
+[[http_get.client.headers]]
+name  = "Referer"
+value = "https://fonts.googleapis.com/"
+
+[[http_get.client.headers]]
+name  = "Origin"
+value = "https://fonts.googleapis.com"
+
+# Server encodes poll responses as XOR-obfuscated base64url, wrapped in CSS comment.
+[http_get.server.output]
+base64url = true
+xor       = "1a2b3c4d"
+prepend   = "/* "
+append    = " */"
+
+[[http_get.server.headers]]
+name  = "Content-Type"
+value = "text/css; charset=utf-8"
+
+[[http_get.server.headers]]
+name  = "Access-Control-Allow-Origin"
+value = "*"
+
+[[http_get.server.headers]]
+name  = "Cache-Control"
+value = "private, max-age=86400"
+
+[[http_get.server.headers]]
+name  = "X-Content-Type-Options"
+value = "nosniff"
+
+# ─── POST block (register + result submission) ────────────────────────────────
+[http_post]
+uri  = "/apis/v1"
+verb = "POST"
+
+[[http_post.client.headers]]
+name  = "Content-Type"
+value = "text/plain;charset=UTF-8"
+
+# Agent obfuscates POST bodies: XOR then base64url encode.
+[http_post.client.output]
+base64url = true
+xor       = "1a2b3c4d"
+
+[[http_post.server.headers]]
+name  = "Content-Type"
+value = "text/plain; charset=utf-8"
+
+# ─── TLS certificate ─────────────────────────────────────────────────────────
+[https_certificate]
+cn      = "fonts.gstatic.com"
+o       = "Google LLC"
+ou      = "Google"
+country = "US"

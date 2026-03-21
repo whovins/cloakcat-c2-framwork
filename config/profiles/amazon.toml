@@ -1,0 +1,72 @@
+# CloakCat Malleable C2 — Amazon S3 camouflage profile
+#
+# Mimics Amazon S3 / CloudFront web traffic.
+# Poll responses are wrapped in a JavaScript variable assignment to blend into
+# page-load traffic; POST bodies are URL-safe base64 encoded.
+
+[metadata]
+name = "amazon"
+description = "Amazon S3/CloudFront traffic camouflage."
+
+# ─── GET block (agent polling) ────────────────────────────────────────────────
+[http_get]
+uri  = "/s"    # routes: /v1/s/register, /v1/s/poll/{id}, /v1/s/result/{id}
+verb = "GET"
+
+[[http_get.client.headers]]
+name  = "Accept"
+value = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+[[http_get.client.headers]]
+name  = "Accept-Language"
+value = "en-US,en;q=0.5"
+
+[[http_get.client.headers]]
+name  = "User-Agent"
+value = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
+
+[[http_get.client.headers]]
+name  = "Referer"
+value = "https://www.amazon.com/"
+
+# Server encodes poll responses as URL-safe base64, wrapped in a JS assignment.
+[http_get.server.output]
+base64url = true
+prepend   = "var _g = '"
+append    = "';"
+
+[[http_get.server.headers]]
+name  = "Content-Type"
+value = "text/javascript"
+
+[[http_get.server.headers]]
+name  = "Cache-Control"
+value = "no-store, no-cache, must-revalidate"
+
+[[http_get.server.headers]]
+name  = "X-Cache"
+value = "Hit from cloudfront"
+
+# ─── POST block (register + result submission) ────────────────────────────────
+[http_post]
+uri  = "/s"    # same base path — POST vs GET disambiguates
+verb = "POST"
+
+[[http_post.client.headers]]
+name  = "Content-Type"
+value = "application/x-www-form-urlencoded"
+
+# Agent encodes POST bodies as URL-safe base64.
+[http_post.client.output]
+base64url = true
+
+[[http_post.server.headers]]
+name  = "Content-Type"
+value = "text/html"
+
+# ─── TLS certificate ─────────────────────────────────────────────────────────
+[https_certificate]
+cn      = "s3.amazonaws.com"
+o       = "Amazon.com Inc."
+ou      = "Amazon Web Services"
+country = "US"

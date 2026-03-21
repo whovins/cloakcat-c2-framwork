@@ -1,0 +1,33 @@
+# CloakCat Malleable C2 — Default profile
+#
+# Plain JSON passthrough; no path prefix, no traffic shaping.
+# Functionally equivalent to the built-in DefaultProfile.
+
+[metadata]
+name = "default"
+description = "Plain JSON; no transforms, no path prefix."
+
+# ─── GET block (agent polling) ────────────────────────────────────────────────
+[http_get]
+uri  = ""      # no path prefix → /v1/poll/{id}
+verb = "GET"
+
+# No custom client headers.
+
+# [http_get.client.output]  — default: identity (no transform)
+
+# [http_get.server.output]  — default: identity (plain JSON response)
+
+# ─── POST block (register + result submission) ────────────────────────────────
+[http_post]
+uri  = ""      # no path prefix → /v1/register, /v1/result/{id}
+verb = "POST"
+
+# [http_post.client.output]  — default: identity (plain JSON body)
+
+# ─── TLS certificate (optional HTTPS CN camouflage) ──────────────────────────
+# [https_certificate]
+# cn      = "example.com"
+# o       = "Acme Corp"
+# ou      = "IT"
+# country = "US"
