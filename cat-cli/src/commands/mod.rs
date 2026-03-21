@@ -260,6 +260,34 @@ enum Cmd {
         args: Option<String>,
     },
 
+    /// List active C2 listeners
+    ListenersList,
+
+    /// Add a new C2 listener at runtime
+    ListenersAdd {
+        /// Unique listener name
+        #[arg(long)]
+        name: String,
+        /// Listener type: http or https
+        #[arg(long, default_value = "https")]
+        r#type: String,
+        /// Bind host address
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+        /// TCP port
+        #[arg(long)]
+        port: u16,
+        /// Malleable C2 profile name
+        #[arg(long)]
+        profile: String,
+    },
+
+    /// Remove (stop) a C2 listener by name
+    ListenersRemove {
+        /// Listener name to remove
+        name: String,
+    },
+
     /// Show available commands
     #[command(alias = "h")]
     Help,
@@ -360,6 +388,13 @@ pub fn dispatch(
         Cmd::SocksStart { agent, port } => socks::cmd_socks_start(&ctx, &agent, port)?,
         Cmd::SocksStop { agent } => socks::cmd_socks_stop(&ctx, &agent)?,
         Cmd::SocksList => socks::cmd_socks_list(&ctx)?,
+
+        // --- listener management ---
+        Cmd::ListenersList => listener::cmd_listeners_list(&ctx)?,
+        Cmd::ListenersAdd { name, r#type, host, port, profile } => {
+            listener::cmd_listeners_add(&ctx, &name, &r#type, &host, port, &profile)?
+        }
+        Cmd::ListenersRemove { name } => listener::cmd_listeners_remove(&ctx, &name)?,
 
         // --- misc ---
         Cmd::Help => {
