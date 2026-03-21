@@ -1,0 +1,32 @@
+# CloakCat server.toml — multi-listener configuration
+#
+# Each [[listeners]] entry starts an independent HTTP or HTTPS listener.
+# The 'profile' field must match a .toml file in config/profiles/.
+#
+# For HTTPS listeners without explicit TLS_CERT_PATH / TLS_KEY_PATH env vars,
+# a self-signed certificate is auto-generated from the profile's
+# [https_certificate] block and saved to config/certs/{profile}.pem.
+
+# ─── Example: Amazon S3 camouflage over HTTPS ────────────────────────────────
+# [[listeners]]
+# name    = "https-amazon"
+# type    = "https"
+# host    = "0.0.0.0"
+# port    = 3443
+# profile = "amazon"
+
+# ─── Example: Google APIs camouflage over HTTPS ──────────────────────────────
+# [[listeners]]
+# name    = "https-google"
+# type    = "https"
+# host    = "0.0.0.0"
+# port    = 8443
+# profile = "google"
+
+# ─── Example: plain HTTP with default profile ────────────────────────────────
+# [[listeners]]
+# name    = "http-default"
+# type    = "http"
+# host    = "127.0.0.1"
+# port    = 3000
+# profile = "default"
