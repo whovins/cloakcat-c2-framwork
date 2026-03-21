@@ -1,6 +1,7 @@
 //! CloakCat agent entry point.
 
 mod beacon;
+mod bof;
 mod config;
 mod exec;
 mod host;
