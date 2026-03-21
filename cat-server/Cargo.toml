@@ -19,3 +19,4 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "uuid", "chrono", "macros", "json"] }
 dotenvy = "0.15"
 anyhow = "1.0.100"
+toml = "0.8"

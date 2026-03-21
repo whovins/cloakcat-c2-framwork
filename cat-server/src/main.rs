@@ -14,6 +14,8 @@ use std::net::SocketAddr;
 
 use sqlx::postgres::PgPoolOptions;
 
+use cloakcat_protocol::ListenerProfile as _;
+
 use crate::routes::build_router;
 use crate::state::AppState;
 
@@ -46,6 +48,20 @@ async fn main() -> anyhow::Result<()> {
         .await?;
     println!("[startup] connected to database = {}", db_name.0);
 
+    // Optionally load a malleable C2 profile from disk.
+    let malleable_profile = std::env::var("MALLEABLE_PROFILE_PATH").ok().and_then(|path| {
+        match cloakcat_protocol::MalleableProfile::from_file(&path) {
+            Ok(p) => {
+                println!("[startup] malleable profile loaded: name={}", p.name());
+                Some(std::sync::Arc::new(p))
+            }
+            Err(e) => {
+                eprintln!("[startup] WARNING: failed to load malleable profile from {:?}: {}", path, e);
+                None
+            }
+        }
+    });
+
     let state = AppState {
         db: pool,
         derived_keys,
@@ -54,6 +70,7 @@ async fn main() -> anyhow::Result<()> {
         upload_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         download_buffers: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         tunnel_mgr: std::sync::Arc::new(tokio::sync::Mutex::new(tunnel::TunnelManager::new())),
+        malleable_profile,
     };
     let app = build_router(state)
         .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)); // 2 MB

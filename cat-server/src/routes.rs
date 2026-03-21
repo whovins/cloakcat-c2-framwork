@@ -19,9 +19,23 @@ fn agent_routes_for(profile: &dyn ListenerProfile) -> Router<AppState> {
 }
 
 pub fn build_router(state: AppState) -> Router {
+    // Clone Arc before moving state into with_state().
+    let malleable = state.malleable_profile.clone();
+
     // Agent routes — require X-Agent-Token via agent_auth middleware
-    let agent_routes = agent_routes_for(&DefaultProfile)
-        .merge(agent_routes_for(&HealthProfile))
+    let mut agent_routes = agent_routes_for(&DefaultProfile)
+        .merge(agent_routes_for(&HealthProfile));
+
+    // Register routes for the active malleable profile (if any and not duplicate base_path).
+    if let Some(ref mp) = malleable {
+        let base = mp.base_path();
+        if !base.is_empty()
+            && base != cloakcat_protocol::HEALTH_BASE_PATH
+        {
+            agent_routes = agent_routes.merge(agent_routes_for(mp.as_ref()));
+        }
+    }
+    let agent_routes = agent_routes
         // Transfer: agent fetches upload file / sends download chunks
         .route("/transfer/upload-file/{transfer_id}", get(handlers::get_upload_file_handler))
         .route("/transfer/download-chunk/{agent_id}", post(handlers::download_chunk_handler))
