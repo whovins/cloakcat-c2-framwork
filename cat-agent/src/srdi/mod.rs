@@ -1,3 +1,4 @@
-//! sRDI (shellcode Reflective DLL Injection) — PE parser and (Phase 8-3) converter.
+//! sRDI (shellcode Reflective DLL Injection) — PE parser and converter.
 
+pub mod converter;
 pub mod pe_parser;
