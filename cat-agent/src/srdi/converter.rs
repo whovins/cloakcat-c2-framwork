@@ -1556,4 +1556,138 @@ mod tests {
             "clear_header flag not embedded in stub"
         );
     }
+
+    // ── File-dump tests ──────────────────────────────────────────────────────
+    //
+    // Run with:
+    //   cargo test -p cat-agent --lib srdi::converter::tests::dump -- --nocapture
+    //
+    // Inspect output with:
+    //   ndisasm -b 64 target/srdi_stub.bin
+    //   xxd target/srdi_stub.bin | head -40
+
+    /// Dumps the raw loader stub bytes to `target/srdi_stub.bin`.
+    ///
+    /// Prints stub size, the first 16 bytes (prologue), and the last 16 bytes
+    /// (find_export epilogue) so disassembly can be quickly spot-checked.
+    #[test]
+    fn dump_stub_bytes() {
+        use std::io::Write;
+
+        let dll = make_minimal_pe_dll();
+        let sc = convert_dll_to_shellcode(&dll, SrdiFlags::default()).unwrap();
+        let stub_len = sc.len() - dll.len();
+        let stub = &sc[..stub_len];
+
+        // Write to <workspace>/target/srdi_stub.bin
+        let out_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("srdi_stub.bin");
+
+        let mut f = std::fs::File::create(&out_path).expect("failed to create srdi_stub.bin");
+        f.write_all(stub).expect("write failed");
+
+        // Print summary to stdout (visible with --nocapture)
+        println!("\n── srdi_stub.bin ──────────────────────────────");
+        println!("path  : {}", out_path.display());
+        println!("size  : {} bytes", stub.len());
+
+        print!("head  :");
+        for b in stub.iter().take(16) {
+            print!(" {:02X}", b);
+        }
+        println!();
+
+        print!("tail  :");
+        for b in stub.iter().rev().take(16).collect::<Vec<_>>().into_iter().rev() {
+            print!(" {:02X}", b);
+        }
+        println!();
+
+        // Hex dump — 16 bytes per row
+        println!("\nhex dump (first 128 bytes):");
+        for (i, chunk) in stub.chunks(16).take(8).enumerate() {
+            print!("  {:04X} : ", i * 16);
+            for b in chunk {
+                print!("{:02X} ", b);
+            }
+            // ASCII column
+            let pad = 16 - chunk.len();
+            for _ in 0..pad {
+                print!("   ");
+            }
+            print!(" | ");
+            for &b in chunk {
+                let c = if b.is_ascii_graphic() { b as char } else { '.' };
+                print!("{}", c);
+            }
+            println!();
+        }
+        println!("──────────────────────────────────────────────\n");
+
+        assert!(out_path.exists());
+        assert_eq!(stub.len(), stub_len);
+    }
+
+    /// Dumps the full shellcode (stub + DLL) to `target/srdi_shellcode.bin`
+    /// and the standalone stub to `target/srdi_stub_only.bin`.
+    ///
+    /// Both `--clear-header` and `--pass-shellcode-base` flags are set to
+    /// exercise all code paths in the generated stub.
+    #[test]
+    fn dump_full_shellcode() {
+        use std::io::Write;
+
+        let dll = make_minimal_pe_dll();
+
+        // Full-flags variant for maximum coverage.
+        let flags = SrdiFlags {
+            clear_header: true,
+            pass_shellcode_base: true,
+        };
+        let sc = convert_dll_to_shellcode(&dll, flags).unwrap();
+
+        let out_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("target");
+
+        let sc_path = out_dir.join("srdi_shellcode.bin");
+        let stub_path = out_dir.join("srdi_stub_only.bin");
+
+        let stub_len = sc.len() - dll.len();
+
+        let mut f = std::fs::File::create(&sc_path).expect("create srdi_shellcode.bin");
+        f.write_all(&sc).expect("write shellcode");
+
+        let mut f = std::fs::File::create(&stub_path).expect("create srdi_stub_only.bin");
+        f.write_all(&sc[..stub_len]).expect("write stub");
+
+        println!("\n── srdi_shellcode.bin ────────────────────────");
+        println!("path       : {}", sc_path.display());
+        println!("total size : {} bytes", sc.len());
+        println!("stub size  : {} bytes (offset 0x{:X})", stub_len, stub_len);
+        println!("dll size   : {} bytes", dll.len());
+        println!("flags      : clear_header=true  pass_shellcode_base=true");
+
+        // Show where the DLL offset patch lives (lea r12 instruction).
+        // The lea is 7 bytes starting at byte 32 (after prologue + call/pop).
+        let lea_off = 32;
+        let dll_off_le = &sc[lea_off + 3..lea_off + 7];
+        let dll_off = u32::from_le_bytes(dll_off_le.try_into().unwrap());
+        println!(
+            "lea r12 @ byte {:3}: disp32 = 0x{:X} (DLL starts at stub+pop+0x{:X} = offset {})",
+            lea_off,
+            dll_off,
+            dll_off,
+            lea_off + 1 + dll_off as usize, // pop_rax is at lea_off+1... approximate
+        );
+        println!("── stub_only: {}", stub_path.display());
+        println!("──────────────────────────────────────────────\n");
+
+        assert!(sc_path.exists());
+        assert_eq!(&sc[stub_len..], &dll[..]);
+    }
 }
