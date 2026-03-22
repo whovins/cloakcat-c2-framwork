@@ -5,6 +5,7 @@ mod bof;
 mod config;
 mod exec;
 mod host;
+pub mod srdi;
 mod tasks;
 mod transport;
 mod tunnel;
