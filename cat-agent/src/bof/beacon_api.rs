@@ -170,19 +170,95 @@ pub unsafe extern "C" fn BeaconDataExtract(
 
 /// `void BeaconPrintf(int type, const char* fmt, ...)`
 ///
-/// BOFs call this with a printf-style format string. We only capture the format
-/// string itself (no varargs expansion in Rust FFI). This is the standard CS
-/// behaviour for simple string output.
+/// Captures formatted output from BOFs. Supports `%s`, `%d`, `%i`, `%u`,
+/// `%x`, `%X`, `%p`, `%ld`/`%lu`/`%lx`, `%lld`/`%llu`, and `%%`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn BeaconPrintf(_typ: c_int, fmt: *const c_char) {
+pub unsafe extern "C" fn BeaconPrintf(_typ: c_int, fmt: *const c_char, mut args: ...) {
     if fmt.is_null() {
         return;
     }
-    let s = unsafe { CStr::from_ptr(fmt) };
-    if let Ok(text) = s.to_str() {
-        output_append(text);
-        output_append("\n");
+    let fmt_bytes = unsafe { CStr::from_ptr(fmt) }.to_bytes();
+    let mut output = String::with_capacity(256);
+    let mut i = 0;
+    while i < fmt_bytes.len() {
+        if fmt_bytes[i] != b'%' {
+            output.push(fmt_bytes[i] as char);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= fmt_bytes.len() {
+            break;
+        }
+        // Consume optional length modifiers: 'l' or 'll'
+        let mut long_count = 0u8;
+        while i < fmt_bytes.len() && fmt_bytes[i] == b'l' {
+            long_count += 1;
+            i += 1;
+        }
+        if i >= fmt_bytes.len() {
+            break;
+        }
+        match fmt_bytes[i] {
+            b'd' | b'i' => {
+                if long_count >= 1 {
+                    let v: i64 = unsafe { args.arg::<i64>() };
+                    output.push_str(&v.to_string());
+                } else {
+                    let v: c_int = unsafe { args.arg::<c_int>() };
+                    output.push_str(&v.to_string());
+                }
+            }
+            b'u' => {
+                if long_count >= 1 {
+                    let v: u64 = unsafe { args.arg::<u64>() };
+                    output.push_str(&v.to_string());
+                } else {
+                    let v: u32 = unsafe { args.arg::<u32>() };
+                    output.push_str(&v.to_string());
+                }
+            }
+            b'x' => {
+                if long_count >= 1 {
+                    let v: u64 = unsafe { args.arg::<u64>() };
+                    output.push_str(&format!("{:x}", v));
+                } else {
+                    let v: u32 = unsafe { args.arg::<u32>() };
+                    output.push_str(&format!("{:x}", v));
+                }
+            }
+            b'X' => {
+                if long_count >= 1 {
+                    let v: u64 = unsafe { args.arg::<u64>() };
+                    output.push_str(&format!("{:X}", v));
+                } else {
+                    let v: u32 = unsafe { args.arg::<u32>() };
+                    output.push_str(&format!("{:X}", v));
+                }
+            }
+            b'p' => {
+                let v: usize = unsafe { args.arg::<usize>() };
+                output.push_str(&format!("{:#x}", v));
+            }
+            b's' => {
+                let ptr: *const c_char = unsafe { args.arg::<*const c_char>() };
+                if !ptr.is_null() {
+                    let s = unsafe { CStr::from_ptr(ptr) };
+                    output.push_str(&s.to_string_lossy());
+                }
+            }
+            b'%' => output.push('%'),
+            other => {
+                output.push('%');
+                for _ in 0..long_count {
+                    output.push('l');
+                }
+                output.push(other as char);
+            }
+        }
+        i += 1;
     }
+    output_append(&output);
 }
 
 /// `void BeaconOutput(int type, const char* data, int len)`

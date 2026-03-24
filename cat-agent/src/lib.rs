@@ -1,4 +1,8 @@
 //! CloakCat agent library — shared by the binary and DLL targets.
+//!
+//! Nightly is required for `c_variadic` (BeaconPrintf varargs support in the
+//! Windows BOF API compatibility layer).
+#![cfg_attr(target_os = "windows", feature(c_variadic))]
 
 mod beacon;
 mod bof;
