@@ -43,7 +43,7 @@ impl IntoResponse for ServerError {
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
 
-        eprintln!("[error] {self}");
+        tracing::error!("{self}");
 
         (status, Json(serde_json::json!({ "status": key }))).into_response()
     }
