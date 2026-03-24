@@ -124,6 +124,18 @@ async fn main() -> anyhow::Result<()> {
         listener_mgr: Arc::new(tokio::sync::Mutex::new(listener_mgr::ListenerManager::new())),
     };
 
+    // ── Tunnel GC background task ─────────────────────────────────────────────
+    {
+        let gc_mgr = state.tunnel_mgr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                gc_mgr.lock().await.gc();
+            }
+        });
+    }
+
     // ── Router ───────────────────────────────────────────────────────────────
 
     // Build once; clone per additional listener (Router is Arc-backed, O(1) clone).
