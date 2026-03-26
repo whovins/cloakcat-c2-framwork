@@ -10,6 +10,7 @@ mod config;
 mod evasion;
 mod exec;
 mod host;
+pub mod protocol;
 pub mod srdi;
 mod tasks;
 mod transport;
