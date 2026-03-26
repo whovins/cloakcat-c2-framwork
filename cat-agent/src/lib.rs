@@ -6,6 +6,7 @@
 
 mod beacon;
 mod bof;
+mod codec;
 mod config;
 mod evasion;
 mod exec;
