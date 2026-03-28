@@ -2,8 +2,10 @@
 
 #![cfg(target_os = "windows")]
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use cloakcat_protocol::{Command, FileChunk, RegisterReq, RegisterResp, ResultReq};
+
+use crate::protocol::envelope::Envelope;
 
 use super::Transport;
 use crate::io::win_pipe::{
@@ -56,8 +58,20 @@ impl PipeTransport {
 }
 
 impl Transport for PipeTransport {
-    async fn register(&self, _url: &str, _token: &str, _req: &RegisterReq) -> Result<RegisterResp> {
-        todo!()
+    async fn register(&self, _url: &str, _token: &str, req: &RegisterReq) -> Result<RegisterResp> {
+        let pipe = self.handle.as_ref().expect("init() must be called before register()");
+
+        let envelope = Envelope::V1Register(req.clone());
+        let payload = serde_json::to_vec(&envelope)?;
+        pipe.send(&payload)?;
+
+        let resp_bytes = pipe.recv()?;
+        let resp_envelope: Envelope = serde_json::from_slice(&resp_bytes)?;
+
+        match resp_envelope {
+            Envelope::V1RegisterResp(resp) => Ok(resp),
+            other => bail!("expected V1RegisterResp, got {:?}", other),
+        }
     }
 
     async fn poll(&self, _url: &str, _token: &str) -> Result<(u16, String)> {
