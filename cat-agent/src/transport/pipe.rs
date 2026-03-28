@@ -55,6 +55,54 @@ impl PipeTransport {
     pub fn pipe_name(&self) -> &str {
         &self.pipe_name
     }
+
+    /// Relay loop: receive envelopes from the child agent and forward
+    /// each request to `upstream`, then send the response back over the pipe.
+    ///
+    /// Runs until the pipe is broken (child disconnected).
+    pub async fn serve_loop<T: Transport>(
+        &self,
+        upstream: &T,
+        url: &str,
+        token: &str,
+    ) -> Result<()> {
+        let pipe = self
+            .handle
+            .as_ref()
+            .expect("init() must be called before serve_loop()");
+
+        loop {
+            let raw = match pipe.recv() {
+                Ok(b) => b,
+                Err(_) => break, // broken pipe — child disconnected
+            };
+
+            let envelope: Envelope = serde_json::from_slice(&raw)?;
+
+            let reply = match envelope {
+                Envelope::V1Register(req) => {
+                    let resp = upstream.register(url, token, &req).await?;
+                    Envelope::V1RegisterResp(resp)
+                }
+                Envelope::V1Poll { agent_id, hold } => {
+                    let poll_url = format!("{}/poll/{}?hold={}", url, agent_id, hold);
+                    let (_status, body) = upstream.poll(&poll_url, token).await?;
+                    let cmd: Option<Command> = serde_json::from_str(&body).unwrap_or(None);
+                    Envelope::V1PollResp(cmd)
+                }
+                Envelope::V1Result(req) => {
+                    upstream.send_result(url, token, &req).await?;
+                    Envelope::V1Ack
+                }
+                other => bail!("unexpected envelope in serve_loop: {:?}", other),
+            };
+
+            let payload = serde_json::to_vec(&reply)?;
+            pipe.send(&payload)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Transport for PipeTransport {
