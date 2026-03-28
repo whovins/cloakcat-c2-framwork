@@ -75,7 +75,26 @@ impl Transport for PipeTransport {
     }
 
     async fn poll(&self, _url: &str, _token: &str) -> Result<(u16, String)> {
-        todo!()
+        let pipe = self.handle.as_ref().expect("init() must be called before poll()");
+
+        let envelope = Envelope::V1Poll {
+            agent_id: String::new(), // filled by caller context
+            hold: 0,
+        };
+        let payload = serde_json::to_vec(&envelope)?;
+        pipe.send(&payload)?;
+
+        let resp_bytes = pipe.recv()?;
+        let resp_envelope: Envelope = serde_json::from_slice(&resp_bytes)?;
+
+        match resp_envelope {
+            Envelope::V1PollResp(cmd) => {
+                let body = serde_json::to_string(&cmd)?;
+                let status = if cmd.is_some() { 200 } else { 204 };
+                Ok((status, body))
+            }
+            other => bail!("expected V1PollResp, got {:?}", other),
+        }
     }
 
     async fn send_result(&self, _url: &str, _token: &str, _req: &ResultReq) -> Result<()> {
