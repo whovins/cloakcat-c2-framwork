@@ -103,6 +103,10 @@ impl PipeTransport {
                     let data = upstream.fetch_upload_file(&fetch_url, token).await?;
                     Envelope::V1FetchUploadResp(data)
                 }
+                Envelope::V1DownloadChunk(chunk) => {
+                    upstream.send_download_chunk(url, token, &chunk).await?;
+                    Envelope::V1DownloadChunkAck
+                }
                 other => bail!("unexpected envelope in serve_loop: {:?}", other),
             };
 
@@ -189,7 +193,19 @@ impl Transport for PipeTransport {
         }
     }
 
-    async fn send_download_chunk(&self, _url: &str, _token: &str, _chunk: &FileChunk) -> Result<()> {
-        todo!()
+    async fn send_download_chunk(&self, _url: &str, _token: &str, chunk: &FileChunk) -> Result<()> {
+        let pipe = self.handle.as_ref().expect("init() must be called before send_download_chunk()");
+
+        let envelope = Envelope::V1DownloadChunk(chunk.clone());
+        let payload = serde_json::to_vec(&envelope)?;
+        pipe.send(&payload)?;
+
+        let resp_bytes = pipe.recv()?;
+        let resp_envelope: Envelope = serde_json::from_slice(&resp_bytes)?;
+
+        match resp_envelope {
+            Envelope::V1DownloadChunkAck => Ok(()),
+            other => bail!("expected V1DownloadChunkAck, got {:?}", other),
+        }
     }
 }

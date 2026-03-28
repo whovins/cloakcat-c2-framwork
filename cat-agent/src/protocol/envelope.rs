@@ -1,6 +1,6 @@
 //! Envelope message wrapper for typed protocol framing.
 
-use cloakcat_protocol::{Command, RegisterReq, RegisterResp, ResultReq};
+use cloakcat_protocol::{Command, FileChunk, RegisterReq, RegisterResp, ResultReq};
 use serde::{Deserialize, Serialize};
 
 /// Top-level protocol envelope — wraps every message exchanged between
@@ -16,4 +16,6 @@ pub enum Envelope {
     V1Ack,
     V1FetchUpload { agent_id: String, file_id: String },
     V1FetchUploadResp(Vec<u8>),
+    V1DownloadChunk(FileChunk),
+    V1DownloadChunkAck,
 }
