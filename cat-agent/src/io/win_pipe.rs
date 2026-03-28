@@ -139,6 +139,43 @@ pub fn connect_pipe_client_retry(name: &str, max_retries: u32, timeout_ms: u32) 
     unreachable!()
 }
 
+/// RAII wrapper around a Windows pipe HANDLE.
+///
+/// Automatically closes the handle on drop. Provides framed send/recv
+/// via [`win_handle::send_msg`] and [`win_handle::recv_msg`].
+pub struct PipeHandle {
+    handle: HANDLE,
+}
+
+impl PipeHandle {
+    /// Wrap a raw HANDLE. The caller transfers ownership — the handle will be
+    /// closed when this value is dropped.
+    pub fn from_raw(h: HANDLE) -> Self {
+        Self { handle: h }
+    }
+
+    /// Send a length-prefixed message over the pipe.
+    pub fn send(&self, payload: &[u8]) -> Result<()> {
+        unsafe { super::win_handle::send_msg(self.handle, payload) }
+    }
+
+    /// Receive a length-prefixed message from the pipe.
+    pub fn recv(&self) -> Result<Vec<u8>> {
+        unsafe { super::win_handle::recv_msg(self.handle) }
+    }
+
+    /// Access the underlying raw HANDLE.
+    pub fn raw(&self) -> HANDLE {
+        self.handle
+    }
+}
+
+impl Drop for PipeHandle {
+    fn drop(&mut self) {
+        close_handle(self.handle);
+    }
+}
+
 /// Close a Windows HANDLE.
 pub fn close_handle(h: HANDLE) {
     unsafe {
