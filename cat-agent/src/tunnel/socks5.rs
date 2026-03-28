@@ -105,10 +105,11 @@ async fn relay(
                 Ok(Some(frame)) => match frame.action {
                     TunnelAction::Close => return,
                     TunnelAction::Data => {
-                        if let Ok(bytes) = B64.decode(&frame.data) {
-                            if !bytes.is_empty() && tcp_writer.write_all(&bytes).await.is_err() {
-                                return;
-                            }
+                        if let Ok(bytes) = B64.decode(&frame.data)
+                            && !bytes.is_empty()
+                            && tcp_writer.write_all(&bytes).await.is_err()
+                        {
+                            return;
                         }
                     }
                     TunnelAction::Open => {} // ignore unexpected

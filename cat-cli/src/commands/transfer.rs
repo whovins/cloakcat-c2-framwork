@@ -36,7 +36,7 @@ pub fn cmd_upload(
     }
 
     let transfer_id = Uuid::new_v4().to_string();
-    let total_chunks = (data.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    let total_chunks = data.len().div_ceil(CHUNK_SIZE);
 
     println!(
         "[upload] {} → {}:{} ({} bytes, {} chunk{})",

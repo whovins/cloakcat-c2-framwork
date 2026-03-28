@@ -18,11 +18,11 @@ pub async fn upload_handler<T: Transport>(
         .await
         .context("failed to fetch upload file from server")?;
 
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create parent dirs for {}", path))?;
-        }
+    if let Some(parent) = std::path::Path::new(path).parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create parent dirs for {}", path))?;
     }
     std::fs::write(path, &bytes)
         .with_context(|| format!("failed to write file to {}", path))?;
@@ -45,7 +45,7 @@ pub async fn download_handler<T: Transport>(
     let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read file {}", path))?;
 
-    let total_chunks = ((bytes.len() + CHUNK_SIZE - 1) / CHUNK_SIZE).max(1) as u32;
+    let total_chunks = bytes.len().div_ceil(CHUNK_SIZE).max(1) as u32;
 
     for (seq, chunk_bytes) in bytes.chunks(CHUNK_SIZE).enumerate() {
         let chunk = FileChunk {

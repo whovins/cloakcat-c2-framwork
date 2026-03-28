@@ -33,6 +33,7 @@ const READ_BUF: usize = 16_384;
 
 // ─── Session ─────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub struct TunnelSession {
     pub tunnel_id: u32,
     pub agent_id: String,

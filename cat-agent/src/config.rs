@@ -34,14 +34,14 @@ pub fn load_agent_config() -> anyhow::Result<AgentConfig> {
         )
     };
 
-    if let Some(path) = path {
-        if path.exists() {
-            let bytes = std::fs::read(&path)
-                .map_err(|e| anyhow::anyhow!("failed to read config {:?}: {}", path, e))?;
-            let cfg: AgentConfig = serde_json::from_slice(&bytes)
-                .map_err(|e| anyhow::anyhow!("failed to parse config {:?}: {}", path, e))?;
-            return Ok(cfg);
-        }
+    if let Some(path) = path
+        && path.exists()
+    {
+        let bytes = std::fs::read(&path)
+            .map_err(|e| anyhow::anyhow!("failed to read config {:?}: {}", path, e))?;
+        let cfg: AgentConfig = serde_json::from_slice(&bytes)
+            .map_err(|e| anyhow::anyhow!("failed to parse config {:?}: {}", path, e))?;
+        return Ok(cfg);
     }
 
     Ok(embedded_cfg)
@@ -56,11 +56,11 @@ pub fn load_agent_config() -> anyhow::Result<AgentConfig> {
 /// 4. `None` — falls back to the built-in profile named in `AgentConfig.profile_name`
 pub fn load_malleable_profile() -> anyhow::Result<Option<MalleableProfile>> {
     // 1. Runtime env override
-    if let Ok(path) = env::var("CLOAKCAT_PROFILE") {
-        if Path::new(&path).exists() {
-            let p = MalleableProfile::from_file(&path)?;
-            return Ok(Some(p));
-        }
+    if let Ok(path) = env::var("CLOAKCAT_PROFILE")
+        && Path::new(&path).exists()
+    {
+        let p = MalleableProfile::from_file(&path)?;
+        return Ok(Some(p));
     }
 
     // 2. File next to binary

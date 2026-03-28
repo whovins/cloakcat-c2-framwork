@@ -4,9 +4,11 @@
 
 use anyhow::{bail, Result};
 
+#[allow(dead_code)]
 const MAX_FRAME_LEN: usize = 16 * 1024 * 1024; // 16 MB
 
 /// Encode `payload` into a length-prefixed frame.
+#[allow(dead_code)]
 pub fn frame_encode(payload: &[u8]) -> Vec<u8> {
     let len = payload.len() as u32;
     let mut buf = Vec::with_capacity(4 + payload.len());
@@ -21,6 +23,7 @@ pub fn frame_encode(payload: &[u8]) -> Vec<u8> {
 /// (4-byte header + payload length).
 ///
 /// Errors if the declared length exceeds 16 MB or the buffer is too short.
+#[allow(dead_code)]
 pub fn frame_decode(buf: &[u8]) -> Result<(usize, &[u8])> {
     if buf.len() < 4 {
         bail!("buffer too short for frame header");

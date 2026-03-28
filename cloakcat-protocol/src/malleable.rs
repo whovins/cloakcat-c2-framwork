@@ -259,6 +259,7 @@ pub struct MalleableProfile {
 
 impl MalleableProfile {
     /// Parse a profile from a TOML string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self> {
         toml::from_str(s).context("failed to parse malleable profile TOML")
     }
@@ -323,7 +324,7 @@ impl ListenerProfile for MalleableProfile {
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 fn hex_to_bytes(hex: &str) -> Result<Vec<u8>> {
-    if hex.len() % 2 != 0 {
+    if !hex.len().is_multiple_of(2) {
         anyhow::bail!("hex string has odd length ({})", hex.len());
     }
     (0..hex.len())

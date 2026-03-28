@@ -2,6 +2,8 @@
 
 #[cfg(target_os = "windows")]
 pub mod pipe;
+#[cfg(target_os = "windows")]
+pub use pipe::PipeTransport;
 
 use std::env;
 

@@ -119,10 +119,10 @@ fn workspace_root() -> PathBuf {
 
 pub fn build_agent(args: BuildAgentArgs) -> Result<()> {
     // DLL / shellcode only make sense for Windows.
-    if matches!(args.format, Format::Dll | Format::Shellcode) {
-        if !matches!(args.os, Os::Windows) {
-            return Err(anyhow!("dll/shellcode format requires --os windows"));
-        }
+    if matches!(args.format, Format::Dll | Format::Shellcode)
+        && !matches!(args.os, Os::Windows)
+    {
+        return Err(anyhow!("dll/shellcode format requires --os windows"));
     }
 
     let root = workspace_root();

@@ -33,5 +33,6 @@ fn main() {
     fs::write(dest2, content2).expect("failed to write embedded_profile.rs");
     println!("cargo:rerun-if-env-changed=CLOAKCAT_EMBED_PROFILE");
 
+    println!("cargo::rustc-check-cfg=cfg(embed_has_out_dir)");
     println!("cargo:rustc-cfg=embed_has_out_dir");
 }

@@ -58,6 +58,7 @@ impl SrdiFlags {
 // ── Hashing (ROR-13 — de-facto standard in shellcode) ───────────────────────
 
 /// ROR-13 hash of an ASCII byte slice (for export function names).
+#[allow(dead_code)]
 pub(crate) fn ror13_hash(s: &[u8]) -> u32 {
     let mut h: u32 = 0;
     for &b in s {
@@ -71,6 +72,7 @@ pub(crate) fn ror13_hash(s: &[u8]) -> u32 {
 ///
 /// Each ASCII byte produces *two* ROR-13 rounds: one for the character and one
 /// for the implicit 0x00 high byte of the UTF-16LE encoding.
+#[allow(dead_code)]
 pub(crate) fn ror13_unicode_hash(s: &[u8]) -> u32 {
     let mut h: u32 = 0;
     for &b in s {
@@ -100,7 +102,7 @@ const fn ror13_hash_const(s: &[u8]) -> u32 {
     let mut h: u32 = 0;
     let mut i = 0;
     while i < s.len() {
-        h = (h >> 13) | (h << 19); // rotate_right(13)
+        h = h.rotate_right(13);
         h = h.wrapping_add(s[i] as u32);
         i += 1;
     }
@@ -116,9 +118,9 @@ const fn ror13_unicode_hash_const(s: &[u8]) -> u32 {
         } else {
             s[i]
         };
-        h = (h >> 13) | (h << 19);
+        h = h.rotate_right(13);
         h = h.wrapping_add(c as u32);
-        h = (h >> 13) | (h << 19);
+        h = h.rotate_right(13);
         // high byte is 0, wrapping_add(0) is no-op
         i += 1;
     }

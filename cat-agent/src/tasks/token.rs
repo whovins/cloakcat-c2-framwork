@@ -4,6 +4,7 @@
 //! Non-Windows builds get stubs that return an error string.
 
 /// Persistent token state held across beacon commands.
+#[allow(dead_code)]
 pub struct TokenState {
     pub impersonating: bool,
     pub impersonated_user: Option<String>,
