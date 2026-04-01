@@ -7,11 +7,12 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use cloakcat_protocol::{FileChunk, PollResponse, SocksListenerView, TaskType, TunnelData};
 
 use crate::config::ListenerEntry;
+use crate::state::StagedPayload;
 use crate::error::ServerError;
 use crate::service;
 use crate::state::AppState;
@@ -459,4 +460,69 @@ pub async fn admin_listeners_remove(
     } else {
         Err(ServerError::NotFound)
     }
+}
+
+// ========== Staging (--host) ==========
+
+#[derive(Deserialize)]
+pub struct StageQuery {
+    /// Delete after first download (default: true).
+    #[serde(default = "bool_true")]
+    pub one_shot: bool,
+    /// Minutes until the payload expires (default: 60).
+    #[serde(default = "default_expire_mins")]
+    pub expire: u64,
+}
+
+fn bool_true() -> bool { true }
+fn default_expire_mins() -> u64 { 60 }
+
+#[derive(Serialize)]
+pub struct StageResp {
+    pub id: String,
+    /// Relative download path: `/d/<id>`
+    pub path: String,
+}
+
+/// POST /v1/admin/stage — upload a payload; returns an anonymous download ID.
+pub async fn stage_upload_handler(
+    State(state): State<AppState>,
+    Query(q): Query<StageQuery>,
+    body: Bytes,
+) -> Result<Json<StageResp>, ServerError> {
+    if body.is_empty() {
+        return Err(ServerError::BadRequest("empty body".into()));
+    }
+    let id = uuid::Uuid::new_v4().to_string().replace('-', "");
+    let expires_at =
+        std::time::Instant::now() + std::time::Duration::from_secs(q.expire * 60);
+    state.staging.lock().await.insert(
+        id.clone(),
+        StagedPayload { data: body.to_vec(), one_shot: q.one_shot, expires_at },
+    );
+    Ok(Json(StageResp { path: format!("/d/{}", id), id }))
+}
+
+/// GET /d/{id} — serve a staged payload (public, no auth).
+pub async fn stage_download_handler(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ServerError> {
+    let mut store = state.staging.lock().await;
+    let now = std::time::Instant::now();
+    let data = match store.get(&id) {
+        None => return Err(ServerError::NotFound),
+        Some(p) if p.expires_at < now => {
+            store.remove(&id);
+            return Err(ServerError::NotFound);
+        }
+        Some(p) => {
+            let data = p.data.clone();
+            if p.one_shot {
+                store.remove(&id);
+            }
+            data
+        }
+    };
+    Ok((StatusCode::OK, [("content-type", "application/octet-stream")], data))
 }

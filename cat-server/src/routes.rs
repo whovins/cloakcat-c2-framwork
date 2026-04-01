@@ -79,6 +79,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/admin/listeners", get(handlers::admin_listeners_list))
         .route("/admin/listeners", post(handlers::admin_listeners_add))
         .route("/admin/listeners/{name}", delete(handlers::admin_listeners_remove))
+        // Staging: upload payload for anonymous one-shot delivery
+        .route("/admin/stage", post(handlers::stage_upload_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::operator_auth,
@@ -91,7 +93,9 @@ pub fn build_router(state: AppState) -> Router {
 
     // Public (unauthenticated) routes — outside version prefix.
     let public_routes = Router::new()
-        .route("/ping", get(handlers::ping_handler));
+        .route("/ping", get(handlers::ping_handler))
+        // Staged payload download — no auth, anonymous delivery
+        .route("/d/{id}", get(handlers::stage_download_handler));
 
     public_routes
         .nest(API_VERSION, versioned)

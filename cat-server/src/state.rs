@@ -17,6 +17,13 @@ pub struct UploadBuffer {
     pub chunks: Vec<Option<Vec<u8>>>,
 }
 
+/// A shellcode payload staged for one-shot HTTP delivery.
+pub struct StagedPayload {
+    pub data: Vec<u8>,
+    pub one_shot: bool,
+    pub expires_at: std::time::Instant,
+}
+
 /// In-memory buffer for a chunked download (agent → server → CLI).
 pub struct DownloadBuffer {
     /// Chunks indexed by seq number; None = not yet received.
@@ -45,6 +52,8 @@ pub struct AppState {
     pub profiles: Arc<HashMap<String, Arc<MalleableProfile>>>,
     /// Dynamic listener manager.
     pub listener_mgr: Arc<Mutex<ListenerManager>>,
+    /// Staged payloads for one-shot HTTP delivery (`GET /d/<id>`).
+    pub staging: Arc<Mutex<HashMap<String, StagedPayload>>>,
 }
 
 impl AppState {
