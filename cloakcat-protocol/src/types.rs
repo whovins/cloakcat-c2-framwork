@@ -319,3 +319,11 @@ pub struct SocksListenerView {
     pub port: u16,
 }
 
+/// Active port-forward entry returned by GET /admin/portfwd/list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortFwdView {
+    pub agent_id: String,
+    pub local_port: u16,
+    pub remote_target: String,
+}
+
