@@ -12,7 +12,9 @@
 #[cfg(target_os = "windows")]
 mod win {
     use anyhow::{bail, Result};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE, INVALID_HANDLE_VALUE};
+    // use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, FALSE, HANDLE};
+    use windows_sys::core::BOOL;
     use windows_sys::Win32::System::Threading::{
         CreateProcessW, OpenProcess, EXTENDED_STARTUPINFO_PRESENT,
         CREATE_SUSPENDED, PROCESS_ALL_ACCESS, PROCESS_INFORMATION,

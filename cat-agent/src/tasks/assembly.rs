@@ -186,8 +186,8 @@ mod win {
 
     #[repr(C)]
     struct ProcessInformation {
-        h_process: isize,
-        h_thread: isize,
+        hProcess: isize,
+        hThread: isize,
         dw_process_id: u32,
         _dw_thread_id: u32,
     }
@@ -1320,9 +1320,9 @@ mod win {
         // Cleanup helper.
         macro_rules! abort {
             ($msg:expr) => {{
-                TerminateProcess(pi.h_process, 1);
-                CloseHandle(pi.h_thread);
-                CloseHandle(pi.h_process);
+                TerminateProcess(pi.hProcess, 1);
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
                 CloseHandle(pipe);
                 return Err(anyhow!($msg));
             }};
@@ -1330,7 +1330,7 @@ mod win {
 
         // 4. Inject data block (RW).
         let data_remote = VirtualAllocEx(
-            pi.h_process, null(), data.len(),
+            pi.hProcess, null(), data.len(),
             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
         );
         if data_remote.is_null() {
@@ -1338,34 +1338,34 @@ mod win {
         }
         let mut written: usize = 0;
         if WriteProcessMemory(
-            pi.h_process, data_remote, data.as_ptr().cast(), data.len(), &mut written,
+            pi.hProcess, data_remote, data.as_ptr().cast(), data.len(), &mut written,
         ) == 0 {
             abort!(format!("WriteProcessMemory(data): error {}", GetLastError()));
         }
 
         // 5. Inject code block (RW → RX).
         let code_remote = VirtualAllocEx(
-            pi.h_process, null(), code.len(),
+            pi.hProcess, null(), code.len(),
             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
         );
         if code_remote.is_null() {
             abort!(format!("VirtualAllocEx(code): error {}", GetLastError()));
         }
         if WriteProcessMemory(
-            pi.h_process, code_remote, code.as_ptr().cast(), code.len(), &mut written,
+            pi.hProcess, code_remote, code.as_ptr().cast(), code.len(), &mut written,
         ) == 0 {
             abort!(format!("WriteProcessMemory(code): error {}", GetLastError()));
         }
         let mut old_prot: u32 = 0;
         if VirtualProtectEx(
-            pi.h_process, code_remote, code.len(), PAGE_EXECUTE_READ, &mut old_prot,
+            pi.hProcess, code_remote, code.len(), PAGE_EXECUTE_READ, &mut old_prot,
         ) == 0 {
             abort!(format!("VirtualProtectEx: error {}", GetLastError()));
         }
 
         // 6. CreateRemoteThread: entry=code, param=data block address.
         let thread = CreateRemoteThread(
-            pi.h_process, null(), 0,
+            pi.hProcess, null(), 0,
             code_remote, data_remote,
             0, null_mut(),
         );
@@ -1374,7 +1374,7 @@ mod win {
         }
 
         // 7. Resume main thread (needed for CRT/ntdll init in child).
-        ResumeThread(pi.h_thread);
+        ResumeThread(pi.hThread);
 
         // 8. Wait for pipe client to connect then read output.
         ConnectNamedPipe(pipe, null_mut());
@@ -1384,10 +1384,10 @@ mod win {
         WaitForSingleObject(thread, 120_000);
 
         // 10. Cleanup.
-        TerminateProcess(pi.h_process, 0);
+        TerminateProcess(pi.hProcess, 0);
         CloseHandle(thread);
-        CloseHandle(pi.h_thread);
-        CloseHandle(pi.h_process);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
         CloseHandle(pipe);
 
         Ok((
