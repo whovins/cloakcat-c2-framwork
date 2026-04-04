@@ -17,8 +17,9 @@ use tokio::time::{sleep, Duration};
 
 const RECV_HOLD_SECS: u64 = 1;
 const CONNECT_TIMEOUT_SECS: u64 = 10;
-const SESSION_TIMEOUT_SECS: u64 = 300;
+const SESSION_TIMEOUT_SECS: u64 = 1800;
 const TCP_BUF_SIZE: usize = 16_384;
+const SEND_RETRY_MAX: u32 = 3;
 
 /// Entry point: connect to target and relay until timeout or close.
 pub async fn run_tunnel(
@@ -49,6 +50,13 @@ async fn relay(
     )
     .await
     .map_err(|_| anyhow::anyhow!("connect timeout to {}", target))??;
+
+    // Enable TCP keepalive so the OS detects dead connections.
+    let sock_ref = socket2::SockRef::from(&stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(60))
+        .with_interval(Duration::from_secs(10));
+    let _ = sock_ref.set_tcp_keepalive(&keepalive);
 
     let (mut tcp_reader, mut tcp_writer) = stream.into_split();
 
@@ -87,7 +95,17 @@ async fn relay(
                         action: TunnelAction::Data,
                         data: B64.encode(&buf[..n]),
                     };
-                    if post_frame(&client1, &send1, &auth1, frame).await.is_err() {
+                    let mut sent = false;
+                    for attempt in 0..SEND_RETRY_MAX {
+                        match post_frame(&client1, &send1, &auth1, frame.clone()).await {
+                            Ok(()) => { sent = true; break; }
+                            Err(_) if attempt + 1 < SEND_RETRY_MAX => {
+                                sleep(Duration::from_millis(200 * (1 << attempt))).await;
+                            }
+                            Err(_) => {}
+                        }
+                    }
+                    if !sent {
                         break;
                     }
                 }
@@ -115,8 +133,8 @@ async fn relay(
                     TunnelAction::Open => {} // ignore unexpected
                 },
                 Ok(None) => {
-                    // 204: no data yet, tight retry
-                    sleep(Duration::from_millis(50)).await;
+                    // 204: no data yet, back off slightly to avoid poll flood
+                    sleep(Duration::from_millis(100)).await;
                 }
                 Err(_) => {
                     sleep(Duration::from_millis(500)).await;

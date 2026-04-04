@@ -22,6 +22,7 @@ serde = { version = "1.0.226", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 get_if_addrs = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

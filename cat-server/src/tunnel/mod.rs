@@ -25,9 +25,9 @@ use tokio::sync::{watch, Mutex, Notify};
 use tokio::time::{sleep, Duration};
 
 /// Maximum simultaneous tunnel sessions per agent.
-pub const MAX_SESSIONS_PER_AGENT: usize = 10;
+pub const MAX_SESSIONS_PER_AGENT: usize = 50;
 /// Idle session timeout in seconds.
-const SESSION_TIMEOUT_SECS: u64 = 300;
+const SESSION_TIMEOUT_SECS: u64 = 1800;
 /// Read buffer size for SOCKS5 relay.
 const READ_BUF: usize = 16_384;
 
@@ -56,12 +56,16 @@ pub struct TunnelManager {
     /// All live sessions (including recently closed; GC'd lazily).
     pub sessions: HashMap<u32, Arc<TunnelSession>>,
     next_id: u32,
-    /// agent_id → listening port.
+    /// agent_id → listening port (SOCKS5 listeners).
     pub listeners: HashMap<String, u16>,
-    /// Shutdown channels for each active listener.
+    /// Shutdown channels for each active SOCKS5 listener.
     shutdown_txs: HashMap<String, watch::Sender<bool>>,
     /// Queued Open frames per agent, delivered on the agent's next poll.
     pub pending_opens: HashMap<String, Vec<TunnelData>>,
+    /// Port-forward entries: "{agent_id}:{local_port}" → (local_port, remote_target).
+    pub portfwds: HashMap<String, (u16, String)>,
+    /// Shutdown channels for each active port-forward listener.
+    portfwd_shutdown_txs: HashMap<String, watch::Sender<bool>>,
 }
 
 impl TunnelManager {
@@ -72,7 +76,22 @@ impl TunnelManager {
             listeners: HashMap::new(),
             shutdown_txs: HashMap::new(),
             pending_opens: HashMap::new(),
+            portfwds: HashMap::new(),
+            portfwd_shutdown_txs: HashMap::new(),
         }
+    }
+
+    fn portfwd_key(agent_id: &str, port: u16) -> String {
+        format!("{}:{}", agent_id, port)
+    }
+
+    /// Stop a port-forward listener. Returns (port, target) if it was active.
+    pub fn stop_portfwd(&mut self, agent_id: &str, port: u16) -> Option<(u16, String)> {
+        let key = Self::portfwd_key(agent_id, port);
+        if let Some(tx) = self.portfwd_shutdown_txs.remove(&key) {
+            let _ = tx.send(true);
+        }
+        self.portfwds.remove(&key)
     }
 
     fn alloc_id(&mut self) -> u32 {
@@ -370,5 +389,196 @@ async fn handle_connection(
     session.from_agent_notify.notify_one();
 
     println!("[tunnel] close: tunnel_id={}", session.tunnel_id);
+    Ok(())
+}
+
+// ─── Port-forward ─────────────────────────────────────────────────────────────
+
+/// Start a plain TCP port-forward on `local_port` that routes all connections
+/// to `remote_target` ("host:port") via the agent.
+pub async fn start_portfwd(
+    agent_id: String,
+    local_port: u16,
+    remote_target: String,
+    tunnel_mgr: Arc<Mutex<TunnelManager>>,
+    cmd_notify: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+) -> anyhow::Result<()> {
+    let key = TunnelManager::portfwd_key(&agent_id, local_port);
+    {
+        let mgr = tunnel_mgr.lock().await;
+        if mgr.portfwds.contains_key(&key) {
+            anyhow::bail!(
+                "port-forward already active for agent {} on port {}",
+                agent_id,
+                local_port
+            );
+        }
+    }
+
+    let listener = TcpListener::bind(("0.0.0.0", local_port)).await?;
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    {
+        let mut mgr = tunnel_mgr.lock().await;
+        mgr.portfwds.insert(key.clone(), (local_port, remote_target.clone()));
+        mgr.portfwd_shutdown_txs.insert(key, shutdown_tx);
+    }
+
+    let tm = tunnel_mgr.clone();
+    let cn = cmd_notify.clone();
+    let ai = agent_id.clone();
+    let rt = remote_target.clone();
+    tokio::spawn(async move {
+        run_portfwd_listener(listener, ai, rt, tm, cn, shutdown_rx).await;
+    });
+
+    println!(
+        "[portfwd] started: agent={} local_port={} -> {}",
+        agent_id, local_port, remote_target
+    );
+    Ok(())
+}
+
+async fn run_portfwd_listener(
+    listener: TcpListener,
+    agent_id: String,
+    remote_target: String,
+    tunnel_mgr: Arc<Mutex<TunnelManager>>,
+    cmd_notify: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            accept = listener.accept() => {
+                match accept {
+                    Ok((stream, peer)) => {
+                        let tm = tunnel_mgr.clone();
+                        let cn = cmd_notify.clone();
+                        let ai = agent_id.clone();
+                        let rt = remote_target.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_portfwd_connection(stream, ai, rt, tm, cn).await {
+                                eprintln!("[portfwd] connection from {} error: {}", peer, e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[portfwd] accept error: {}", e);
+                        break;
+                    }
+                }
+            }
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() { break; }
+            }
+        }
+    }
+    println!("[portfwd] listener stopped: agent={}", agent_id);
+}
+
+/// Accept a raw TCP connection and relay it to `remote_target` via the agent.
+/// No SOCKS5 handshake — the connection is forwarded immediately.
+async fn handle_portfwd_connection(
+    stream: TcpStream,
+    agent_id: String,
+    remote_target: String,
+    tunnel_mgr: Arc<Mutex<TunnelManager>>,
+    cmd_notify: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+) -> anyhow::Result<()> {
+    let session: Arc<TunnelSession> = {
+        let mut mgr = tunnel_mgr.lock().await;
+        if mgr.active_session_count(&agent_id) >= MAX_SESSIONS_PER_AGENT {
+            anyhow::bail!("max sessions reached for agent {}", agent_id);
+        }
+        let tunnel_id = mgr.alloc_id();
+        let sess = Arc::new(TunnelSession {
+            tunnel_id,
+            agent_id: agent_id.clone(),
+            target: remote_target.clone(),
+            to_agent: Arc::new(Mutex::new(VecDeque::new())),
+            to_agent_notify: Arc::new(Notify::new()),
+            from_agent: Arc::new(Mutex::new(VecDeque::new())),
+            from_agent_notify: Arc::new(Notify::new()),
+            closed: Arc::new(AtomicBool::new(false)),
+            created_at: Instant::now(),
+        });
+        mgr.sessions.insert(tunnel_id, sess.clone());
+        mgr.pending_opens
+            .entry(agent_id.clone())
+            .or_default()
+            .push(TunnelData {
+                tunnel_id,
+                action: TunnelAction::Open,
+                data: remote_target.clone(),
+            });
+        sess
+    };
+
+    {
+        let mut cn = cmd_notify.lock().await;
+        cn.entry(agent_id.clone())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .notify_one();
+    }
+
+    println!(
+        "[portfwd] open: agent={} tunnel_id={} target={}",
+        agent_id, session.tunnel_id, remote_target
+    );
+
+    let (mut reader, mut writer) = stream.into_split();
+
+    let to_agent = session.to_agent.clone();
+    let ta_notify = session.to_agent_notify.clone();
+    let closed_r = session.closed.clone();
+    let read_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; READ_BUF];
+        loop {
+            match reader.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    to_agent.lock().await.push_back(buf[..n].to_vec());
+                    ta_notify.notify_one();
+                }
+            }
+        }
+        closed_r.store(true, Ordering::Release);
+        ta_notify.notify_waiters();
+    });
+
+    let from_agent = session.from_agent.clone();
+    let fa_notify = session.from_agent_notify.clone();
+    let closed_w = session.closed.clone();
+    let write_task = tokio::spawn(async move {
+        loop {
+            fa_notify.notified().await;
+            if closed_w.load(Ordering::Acquire) {
+                break;
+            }
+            let chunks: Vec<Vec<u8>> = {
+                let mut q = from_agent.lock().await;
+                q.drain(..).collect()
+            };
+            for chunk in chunks {
+                if writer.write_all(&chunk).await.is_err() {
+                    closed_w.store(true, Ordering::Release);
+                    return;
+                }
+            }
+        }
+    });
+
+    let timeout = Duration::from_secs(SESSION_TIMEOUT_SECS);
+    tokio::select! {
+        _ = read_task => {}
+        _ = write_task => {}
+        _ = sleep(timeout) => {}
+    }
+
+    session.closed.store(true, Ordering::Release);
+    session.to_agent_notify.notify_waiters();
+    session.from_agent_notify.notify_one();
+
+    println!("[portfwd] close: tunnel_id={}", session.tunnel_id);
     Ok(())
 }
