@@ -26,7 +26,7 @@ pub async fn beacon_main() -> anyhow::Result<()> {
 
 // ── Windows DLL entry point ────────────────────────────────────────────────
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 #[cfg(target_os = "windows")]
 pub extern "system" fn DllMain(
     _hinst: *mut u8,

