@@ -173,9 +173,12 @@ fn build_exe(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result<()> {
         ),
     };
 
+    let profile_path = root.join("config").join("profiles").join(format!("{}.toml", args.profile));
+
     let mut cmd = std::process::Command::new("cargo");
     cmd.current_dir(root)
         .env("CLOAKCAT_EMBED_CONFIG", cfg_json)
+        .env("CLOAKCAT_EMBED_PROFILE", &profile_path)
         .arg("build")
         .arg("-p")
         .arg("cat-agent")
@@ -203,9 +206,12 @@ fn build_dll(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result<()> {
         .join("release")
         .join("cat_agent.dll");
 
+    let profile_path = root.join("config").join("profiles").join(format!("{}.toml", args.profile));
+
     let mut cmd = std::process::Command::new("cargo");
     cmd.current_dir(root)
         .env("CLOAKCAT_EMBED_CONFIG", cfg_json)
+        .env("CLOAKCAT_EMBED_PROFILE", &profile_path)
         .arg("build")
         .arg("-p")
         .arg("cat-agent")
@@ -234,9 +240,12 @@ fn build_shellcode(root: &Path, args: &BuildAgentArgs, cfg_json: &str) -> Result
         .join("release")
         .join("cat_agent.dll");
 
+    let profile_path = root.join("config").join("profiles").join(format!("{}.toml", args.profile));
+
     let mut cmd = std::process::Command::new("cargo");
     cmd.current_dir(root)
         .env("CLOAKCAT_EMBED_CONFIG", cfg_json)
+        .env("CLOAKCAT_EMBED_PROFILE", &profile_path)
         .arg("build")
         .arg("-p")
         .arg("cat-agent")
