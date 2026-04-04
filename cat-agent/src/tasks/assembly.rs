@@ -13,11 +13,11 @@ mod win {
     use anyhow::{anyhow, Result};
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
-
+    use windows_sys::Win32::System::Diagnostics::Debug::WriteProcessMemory;
     // ── FFI declarations ─────────────────────────────────────
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetLastError() -> u32;
         fn GetStdHandle(nStdHandle: u32) -> isize;
         fn SetStdHandle(nStdHandle: u32, hHandle: isize) -> i32;
@@ -76,13 +76,14 @@ mod win {
             flAllocationType: u32,
             flProtect: u32,
         ) -> *mut c_void;
-        fn WriteProcessMemory(
-            hProcess: isize,
-            lpBaseAddress: *mut c_void,
-            lpBuffer: *const c_void,
-            nSize: usize,
-            lpNumberOfBytesWritten: *mut usize,
-        ) -> i32;
+
+        // fn WriteProcessMemory(
+        //     hProcess: isize,
+        //     lpBaseAddress: *mut c_void,
+        //     lpBuffer: *const c_void,
+        //     nSize: usize,
+        //     lpNumberOfBytesWritten: *mut usize,
+        // ) -> i32;
         fn VirtualProtectEx(
             hProcess: isize,
             lpAddress: *mut c_void,
@@ -105,13 +106,13 @@ mod win {
     }
 
     #[link(name = "ole32")]
-    extern "system" {
+    unsafe extern "system" {
         fn CoInitializeEx(pvReserved: *const c_void, dwCoInit: u32) -> i32;
         fn CoUninitialize();
     }
 
     #[link(name = "oleaut32")]
-    extern "system" {
+    unsafe extern "system" {
         fn SafeArrayCreateVector(vt: u16, lLbound: i32, cElements: u32) -> *mut c_void;
         fn SafeArrayAccessData(psa: *mut c_void, ppvData: *mut *mut c_void) -> i32;
         fn SafeArrayUnaccessData(psa: *mut c_void) -> i32;

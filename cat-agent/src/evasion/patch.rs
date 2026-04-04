@@ -82,7 +82,7 @@ mod win {
             let fn_name = CString::new("AmsiScanBuffer").unwrap();
 
             let module = unsafe { LoadLibraryA(dll_name.as_ptr() as *const u8) };
-            if module == 0 {
+            if module.is_null() {
                 bail!("LoadLibraryA(amsi.dll) failed");
             }
             let addr = unsafe { GetProcAddress(module, fn_name.as_ptr() as *const u8) };
@@ -103,7 +103,7 @@ mod win {
             let fn_name = CString::new("EtwEventWrite").unwrap();
 
             let module = unsafe { GetModuleHandleA(dll_name.as_ptr() as *const u8) };
-            if module == 0 {
+            if module.is_null() {
                 bail!("GetModuleHandleA(ntdll.dll) failed");
             }
             let addr = unsafe { GetProcAddress(module, fn_name.as_ptr() as *const u8) };

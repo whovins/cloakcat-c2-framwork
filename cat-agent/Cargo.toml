@@ -23,6 +23,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 uuid = { version = "1.18.1", features = ["v4"] }
 get_if_addrs = "0.5"
 socket2 = { version = "0.5", features = ["all"] }
+windows-sys = { version = "0.61.2", features = ["Win32_System_Diagnostics_Debug"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

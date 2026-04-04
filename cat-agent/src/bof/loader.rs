@@ -18,7 +18,7 @@ use super::coff_parser::*;
 // ── Win32 FFI ─────────────────────────────────────────────────────────────────
 
 #[link(name = "kernel32")]
-extern "system" {
+unsafe extern "system" {
     fn VirtualAlloc(
         lpAddress: *mut c_void,
         dwSize: usize,

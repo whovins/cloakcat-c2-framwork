@@ -59,7 +59,7 @@ pub mod win {
 
         unsafe {
             let module = GetModuleHandleA(dll.as_ptr() as *const u8);
-            if module == 0 {
+            if module.is_null() {
                 bail!("GetModuleHandleA(ntdll.dll) failed");
             }
 
@@ -204,7 +204,7 @@ pub mod win {
         process: HANDLE,
         start: *mut u8,
     ) -> Result<HANDLE> {
-        let mut thread_handle: HANDLE = 0;
+        let mut thread_handle: HANDLE = std::ptr::null_mut();
 
         // NtCreateThreadEx has 11 parameters. We pass the essential ones and
         // zero out the rest (DesiredAccess=THREAD_ALL_ACCESS, ObjectAttributes=NULL,

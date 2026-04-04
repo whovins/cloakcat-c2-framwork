@@ -12,7 +12,7 @@
 #[cfg(target_os = "windows")]
 mod win {
     use anyhow::{bail, Result};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Threading::{
         CreateProcessW, OpenProcess, EXTENDED_STARTUPINFO_PRESENT,
         CREATE_SUSPENDED, PROCESS_ALL_ACCESS, PROCESS_INFORMATION,
@@ -22,7 +22,7 @@ mod win {
     const PROC_THREAD_ATTRIBUTE_PARENT_PROCESS: usize = 0x00020000;
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn InitializeProcThreadAttributeList(
             lpAttributeList: *mut u8,
             dwAttributeCount: u32,
@@ -53,14 +53,14 @@ mod win {
     /// Find the PID of a running process by name (case-insensitive).
     /// Returns the first match found.
     pub fn find_process_by_name(name: &str) -> Result<u32> {
-        use windows_sys::Win32::System::Threading::{
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
             PROCESSENTRY32W, TH32CS_SNAPPROCESS,
         };
 
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if snap == -1_isize {
+            if snap == INVALID_HANDLE_VALUE {
                 bail!("CreateToolhelp32Snapshot failed: error {}", GetLastError());
             }
 
@@ -87,7 +87,7 @@ mod win {
                     && exe
                         .iter()
                         .zip(target.iter())
-                        .all(|(&a, &b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+                        .all(|(&a, &b)| (a as u8).to_ascii_lowercase() == (b as u8).to_ascii_lowercase())
                 {
                     let pid = entry.th32ProcessID;
                     CloseHandle(snap);
@@ -114,7 +114,7 @@ mod win {
         unsafe {
             // Open the parent process to get a handle.
             let parent = OpenProcess(PROCESS_ALL_ACCESS, FALSE, parent_pid);
-            if parent == 0 {
+            if parent.is_null() {
                 bail!(
                     "OpenProcess(parent PID {}) failed: error {}",
                     parent_pid,

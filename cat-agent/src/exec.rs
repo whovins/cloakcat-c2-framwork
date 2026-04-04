@@ -33,9 +33,9 @@ pub async fn run_command(cmd: &Command) -> anyhow::Result<(i32, String, String)>
     let mut output = {
         #[cfg(target_os = "windows")]
         {
-            TokioCommand::new("cmd")
-                .arg("/C")
-                .arg(&cmd.command)
+            let mut c = TokioCommand::new("cmd");
+            c.arg("/C").arg(&cmd.command);
+            c
         }
         #[cfg(not(target_os = "windows"))]
         {

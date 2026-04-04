@@ -19,12 +19,12 @@ mod win {
     // ── FFI declarations ─────────────────────────────────────
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetLastError() -> u32;
     }
 
     #[link(name = "advapi32")]
-    extern "system" {
+    unsafe extern "system" {
         fn OpenSCManagerW(
             lpMachineName: *const u16,
             lpDatabaseName: *const u16,
@@ -59,7 +59,7 @@ mod win {
     }
 
     #[link(name = "ole32")]
-    extern "system" {
+    unsafe extern "system" {
         fn CoInitializeEx(pvReserved: *const c_void, dwCoInit: u32) -> i32;
 
         fn CoCreateInstance(
@@ -85,7 +85,7 @@ mod win {
     }
 
     #[link(name = "oleaut32")]
-    extern "system" {
+    unsafe extern "system" {
         fn SysAllocString(psz: *const u16) -> *mut u16;
         fn SysFreeString(bstrString: *mut u16);
     }

@@ -5,18 +5,21 @@
 use anyhow::{bail, Result};
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, ERROR_PIPE_CONNECTED,
-        ERROR_PIPE_BUSY,
+        CloseHandle, GetLastError, GENERIC_READ, GENERIC_WRITE, HANDLE,
+        INVALID_HANDLE_VALUE, ERROR_PIPE_CONNECTED, ERROR_PIPE_BUSY,
     },
     Storage::FileSystem::{
-        CreateFileW, GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING,
+        CreateFileW, OPEN_EXISTING,
     },
     System::Pipes::{
         ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, SetNamedPipeHandleState,
         WaitNamedPipeW,
-        PIPE_ACCESS_DUPLEX, PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE, PIPE_WAIT,
+        PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE, PIPE_WAIT,
     },
 };
+
+// PIPE_ACCESS_DUPLEX is a named-pipe open-mode flag (value 0x3).
+const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
 
 /// Create a named pipe server in message mode.
 ///
@@ -88,7 +91,7 @@ pub fn connect_pipe_client(name: &str) -> Result<HANDLE> {
             std::ptr::null(),
             OPEN_EXISTING,
             0,
-            0,
+            std::ptr::null_mut(),
         )
     };
 
