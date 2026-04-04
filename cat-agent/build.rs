@@ -32,6 +32,10 @@ fn main() {
     let content2 = ["pub const EMBEDDED_PROFILE_TOML: &str = \"", &escaped2, "\";"].concat();
     fs::write(dest2, content2).expect("failed to write embedded_profile.rs");
     println!("cargo:rerun-if-env-changed=CLOAKCAT_EMBED_PROFILE");
+    // Also invalidate when the profile file's content changes.
+    if let Ok(path) = env::var("CLOAKCAT_EMBED_PROFILE") {
+        println!("cargo:rerun-if-changed={path}");
+    }
 
     println!("cargo::rustc-check-cfg=cfg(embed_has_out_dir)");
     println!("cargo:rustc-cfg=embed_has_out_dir");
