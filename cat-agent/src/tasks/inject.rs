@@ -19,8 +19,7 @@ mod win {
     use crate::evasion::syscall::{self, nt_success, SyscallTable};
     use anyhow::Result;
     // use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE};
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, FALSE, HANDLE};
-    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, BOOL, FALSE, HANDLE};
     use windows_sys::Win32::System::Memory::{
         VirtualAllocEx, VirtualProtectEx, MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READ,
         PAGE_READWRITE,
