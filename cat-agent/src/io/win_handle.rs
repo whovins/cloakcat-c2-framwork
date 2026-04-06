@@ -5,10 +5,13 @@
 #![cfg(target_os = "windows")]
 
 use anyhow::{bail, Result};
-use windows_sys::Win32::{
-    Foundation::{GetLastError, HANDLE},
-    Storage::FileSystem::{ReadFile, WriteFile},
-};
+use windows_sys::Win32::Foundation::{GetLastError, HANDLE};
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn ReadFile(hFile: HANDLE, lpBuffer: *mut u8, nNumberOfBytesToRead: u32, lpNumberOfBytesRead: *mut u32, lpOverlapped: *mut core::ffi::c_void) -> i32;
+    fn WriteFile(hFile: HANDLE, lpBuffer: *const u8, nNumberOfBytesToWrite: u32, lpNumberOfBytesWritten: *mut u32, lpOverlapped: *mut core::ffi::c_void) -> i32;
+}
 
 use crate::codec::frame_encode;
 

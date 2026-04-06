@@ -12,11 +12,16 @@ use windows_sys::Win32::{
         CreateFileW, OPEN_EXISTING,
     },
     System::Pipes::{
-        ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, SetNamedPipeHandleState,
+        CreateNamedPipeW, DisconnectNamedPipe, SetNamedPipeHandleState,
         WaitNamedPipeW,
         PIPE_READMODE_MESSAGE, PIPE_TYPE_MESSAGE, PIPE_WAIT,
     },
 };
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn ConnectNamedPipe(hNamedPipe: HANDLE, lpOverlapped: *mut core::ffi::c_void) -> i32;
+}
 
 // PIPE_ACCESS_DUPLEX is a named-pipe open-mode flag (value 0x3).
 const PIPE_ACCESS_DUPLEX: u32 = 0x00000003;
